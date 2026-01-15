@@ -1,0 +1,45 @@
+
+> attendance-frontend@0.1.0 lint
+> eslint
+
+
+/home/vedantchalke36/attendance-frontend/app/(auth)/login/page.tsx
+  14:47  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/vedantchalke36/attendance-frontend/app/(dashboard)/admin/layout.tsx
+  3:27  warning  'Settings' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/vedantchalke36/attendance-frontend/app/(dashboard)/advisor/layout.tsx
+  3:46  warning  'Menu' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/vedantchalke36/attendance-frontend/app/(dashboard)/advisor/page.tsx
+  20:88  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+
+/home/vedantchalke36/attendance-frontend/app/(dashboard)/teacher/page.tsx
+  18:110  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+
+/home/vedantchalke36/attendance-frontend/components/attendance/AttendanceSession.tsx
+   9:10  warning  'motion' is defined but never used     @typescript-eslint/no-unused-vars
+  20:45  warning  'sessionId' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/vedantchalke36/attendance-frontend/components/attendance/StudentCard.tsx
+  34:9   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/home/vedantchalke36/attendance-frontend/components/attendance/StudentCard.tsx:34:9
+  32 |     useEffect(() => {
+  33 |         y.set(0);
+> 34 |         setFeedback(null);
+     |         ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  35 |         controls.start({ y: 0, opacity: 1, scale: 1 });
+  36 |     }, [student.id, controls, y]);
+  37 |  react-hooks/set-state-in-effect
+  39:41  error  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      @typescript-eslint/no-explicit-any
+
+✖ 9 problems (5 errors, 4 warnings)
+
