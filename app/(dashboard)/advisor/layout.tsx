@@ -1,8 +1,8 @@
 "use client";
 
-import { FileBarChart, Users, AlertTriangle } from 'lucide-react';
+import { FileBarChart, Users, AlertTriangle, LogOut, Download } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 export default function AdvisorLayout({
     children,
@@ -10,11 +10,17 @@ export default function AdvisorLayout({
     children: React.ReactNode;
 }) {
     const pathname = usePathname();
+    const router = useRouter();
+
+    const handleLogout = () => {
+        router.push('/login');
+    };
 
     const navItems = [
         { href: '/advisor', label: 'Overview', icon: FileBarChart },
         { href: '/advisor/students', label: 'Students', icon: Users },
         { href: '/advisor/risks', label: 'At Risk', icon: AlertTriangle },
+        { href: '/advisor/downloads', label: 'Downloads', icon: Download },
     ];
 
     return (
@@ -26,8 +32,17 @@ export default function AdvisorLayout({
                     </div>
                     <span className="font-semibold text-neutral-900 dark:text-neutral-100">Advisor Console</span>
                 </div>
-                <div className="text-xs text-neutral-500 font-medium px-3 py-1 bg-neutral-100 dark:bg-neutral-800 rounded-full">
-                    Class of 2026
+                <div className="flex items-center gap-4">
+                    <div className="text-xs text-neutral-500 font-medium px-3 py-1 bg-neutral-100 dark:bg-neutral-800 rounded-full">
+                        Class of 2026
+                    </div>
+                    <button
+                        onClick={handleLogout}
+                        className="text-neutral-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                        title="Logout"
+                    >
+                        <LogOut size={20} />
+                    </button>
                 </div>
             </header>
 

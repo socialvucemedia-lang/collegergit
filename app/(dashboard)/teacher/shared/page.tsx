@@ -2,8 +2,14 @@
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ArrowRight, Clock, Users } from "lucide-react";
+import { ArrowRight, Clock, Users, Plus, Send } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
+import { useState } from "react";
 import Link from "next/link";
 
 export default function SharedSessionsPage() {
@@ -28,11 +34,67 @@ export default function SharedSessionsPage() {
         }
     ];
 
+    const [open, setOpen] = useState(false);
+
+    const handleAssign = () => {
+        setOpen(false);
+        toast.success("Class assigned successfully", {
+            description: "Notification sent to designated faculty."
+        });
+    };
+
     return (
         <div className="space-y-6 pb-20">
-            <div className="space-y-1">
-                <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">Shared with You</h1>
-                <p className="text-neutral-500">Collaborate on sessions initiated by colleagues</p>
+            <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">Shared with You</h1>
+                    <p className="text-neutral-500">Collaborate on sessions initiated by colleagues</p>
+                </div>
+
+                <Dialog open={open} onOpenChange={setOpen}>
+                    <DialogTrigger asChild>
+                        <Button>
+                            <Plus size={16} className="mr-2" /> Assign Class
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Assign Class to Faculty</DialogTitle>
+                            <DialogDescription>
+                                Request another faculty member to conduct your session.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                            <div className="space-y-2">
+                                <Label>Select Faculty</Label>
+                                <Input placeholder="Search faculty name..." />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Subject / Batch</Label>
+                                <Input placeholder="e.g. Data Structures (B2)" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Date</Label>
+                                    <Input type="date" />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Time</Label>
+                                    <Input type="time" />
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Note</Label>
+                                <Input placeholder="Instructions (optional)" />
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button className="w-full" onClick={handleAssign}>
+                                <Send size={16} className="mr-2" /> Send Request
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

@@ -1,8 +1,8 @@
 "use client";
 
-import { Home, Calendar, User, Bell } from 'lucide-react';
+import { Home, Calendar, User, Bell, LogOut } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 export default function StudentLayout({
     children,
@@ -10,6 +10,11 @@ export default function StudentLayout({
     children: React.ReactNode;
 }) {
     const pathname = usePathname();
+    const router = useRouter();
+
+    const handleLogout = () => {
+        router.push('/login');
+    };
 
     const navItems = [
         { href: '/student', label: 'Today', icon: Home },
@@ -22,9 +27,18 @@ export default function StudentLayout({
             {/* Top Bar - Minimal */}
             <header className="fixed top-0 left-0 right-0 h-14 bg-neutral-50/80 dark:bg-neutral-950/80 backdrop-blur-md z-40 px-4 flex items-center justify-between">
                 <span className="font-bold text-lg text-neutral-900 dark:text-neutral-100">Student Portal</span>
-                <button className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100">
-                    <Bell size={20} />
-                </button>
+                <div className="flex items-center gap-2">
+                    <button className="p-2 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100">
+                        <Bell size={20} />
+                    </button>
+                    <button
+                        onClick={handleLogout}
+                        className="p-2 text-neutral-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                        title="Logout"
+                    >
+                        <LogOut size={20} />
+                    </button>
+                </div>
             </header>
 
             <main className="pt-20 px-4 max-w-lg mx-auto">

@@ -1,8 +1,8 @@
 "use client";
 
-import { GraduationCap, Users, ClipboardList, Menu } from 'lucide-react';
+import { GraduationCap, Users, ClipboardList, Menu, LogOut } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 
 export default function TeacherLayout({
@@ -11,6 +11,11 @@ export default function TeacherLayout({
     children: React.ReactNode;
 }) {
     const pathname = usePathname();
+    const router = useRouter();
+
+    const handleLogout = () => {
+        router.push('/login');
+    };
 
     const navItems = [
         { href: '/teacher', label: 'Classes', icon: GraduationCap },
@@ -45,6 +50,15 @@ export default function TeacherLayout({
                             </Link>
                         ))}
                     </div>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={handleLogout}
+                        className="text-neutral-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20"
+                        title="Logout"
+                    >
+                        <LogOut size={20} />
+                    </Button>
                 </div>
             </header>
 

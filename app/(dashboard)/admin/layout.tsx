@@ -1,13 +1,20 @@
 "use client";
 
-import { LayoutDashboard, UserCog, Building2 } from 'lucide-react';
+import { LayoutDashboard, UserCog, Building2, LogOut } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export default function AdminLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
+    const router = useRouter();
+
+    const handleLogout = () => {
+        router.push('/login');
+    };
+
     return (
         <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex flex-col md:flex-row">
             {/* Sidebar for Desktop / Hidden on Mobile for now (Mobile simplified) */}
@@ -29,6 +36,15 @@ export default function AdminLayout({
                         Departments
                     </Link>
                 </nav>
+                <div className="p-4 border-t border-neutral-200 dark:border-neutral-800">
+                    <button
+                        onClick={handleLogout}
+                        className="flex items-center gap-3 px-3 py-2 w-full text-sm font-medium rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/20 transition-colors"
+                    >
+                        <LogOut size={18} />
+                        Logout
+                    </button>
+                </div>
             </aside>
 
             {/* Mobile Header */}
