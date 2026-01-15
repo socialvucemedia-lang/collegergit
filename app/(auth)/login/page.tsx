@@ -20,11 +20,19 @@ const ROLES: { id: Role; label: string; icon: React.ElementType; description: st
 
 export default function LoginPage() {
     const [selectedRole, setSelectedRole] = useState<Role | null>(null);
+    const [credentials, setCredentials] = useState({ email: '', password: '' });
     const router = useRouter();
 
     const handleLogin = (e: React.FormEvent) => {
         e.preventDefault();
         if (!selectedRole) return;
+
+        // Restriction Check
+        if (credentials.email !== 'admin@mctrgit.ac.in' || credentials.password !== 'admin') {
+            alert("Access Restricted: Only admin@mctrgit.ac.in allowed.");
+            return;
+        }
+
         // Mock login - in production this would be real auth
         router.push(`/${selectedRole}`);
     };
@@ -80,7 +88,10 @@ export default function LoginPage() {
                                             variant="ghost"
                                             size="sm"
                                             className="px-0 h-auto hover:bg-transparent hover:text-neutral-900 text-neutral-500"
-                                            onClick={() => setSelectedRole(null)}
+                                            onClick={() => {
+                                                setSelectedRole(null);
+                                                setCredentials({ email: '', password: '' });
+                                            }}
                                             type="button"
                                         >
                                             ← Back
@@ -93,23 +104,53 @@ export default function LoginPage() {
                                     {selectedRole === 'student' ? (
                                         <div className="space-y-4">
                                             <div className="space-y-2">
-                                                <Label htmlFor="roll">Roll Number</Label>
-                                                <Input id="roll" placeholder="e.g. 21101A0001" required className="bg-neutral-50 dark:bg-neutral-900" />
+                                                <Label htmlFor="roll">Roll Number (Email)</Label>
+                                                <Input
+                                                    id="roll"
+                                                    placeholder="admin@mctrgit.ac.in"
+                                                    required
+                                                    className="bg-neutral-50 dark:bg-neutral-900"
+                                                    value={credentials.email}
+                                                    onChange={e => setCredentials({ ...credentials, email: e.target.value })}
+                                                />
                                             </div>
                                             <div className="space-y-2">
-                                                <Label htmlFor="ern">ERN (First Login)</Label>
-                                                <Input id="ern" type="password" placeholder="••••••" required className="bg-neutral-50 dark:bg-neutral-900" />
+                                                <Label htmlFor="ern">ERN (Password)</Label>
+                                                <Input
+                                                    id="ern"
+                                                    type="password"
+                                                    placeholder="••••••"
+                                                    required
+                                                    className="bg-neutral-50 dark:bg-neutral-900"
+                                                    value={credentials.password}
+                                                    onChange={e => setCredentials({ ...credentials, password: e.target.value })}
+                                                />
                                             </div>
                                         </div>
                                     ) : (
                                         <div className="space-y-4">
                                             <div className="space-y-2">
                                                 <Label htmlFor="email">Institutional Email</Label>
-                                                <Input id="email" type="email" placeholder="faculty@institution.edu" required className="bg-neutral-50 dark:bg-neutral-900" />
+                                                <Input
+                                                    id="email"
+                                                    type="email"
+                                                    placeholder="admin@mctrgit.ac.in"
+                                                    required
+                                                    className="bg-neutral-50 dark:bg-neutral-900"
+                                                    value={credentials.email}
+                                                    onChange={e => setCredentials({ ...credentials, email: e.target.value })}
+                                                />
                                             </div>
                                             <div className="space-y-2">
                                                 <Label htmlFor="password">Password</Label>
-                                                <Input id="password" type="password" required className="bg-neutral-50 dark:bg-neutral-900" />
+                                                <Input
+                                                    id="password"
+                                                    type="password"
+                                                    required
+                                                    className="bg-neutral-50 dark:bg-neutral-900"
+                                                    value={credentials.password}
+                                                    onChange={e => setCredentials({ ...credentials, password: e.target.value })}
+                                                />
                                             </div>
                                         </div>
                                     )}
