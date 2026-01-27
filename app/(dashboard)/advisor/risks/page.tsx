@@ -1,102 +1,253 @@
 "use client";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useState, useEffect } from "react";
+import { AlertTriangle, User, Mail, TrendingDown, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { useState, useMemo } from "react";
-import { Mail, Phone, ChevronRight } from "lucide-react";
-import Link from "next/link";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
 
-import studentData from "@/data/students.json";
-import { Student } from "@/types/student";
+interface AtRiskStudent {
+    id: string;
+    roll_number: string;
+    name: string;
+    email: string;
+    semester: number | null;
+    department: string | null;
+    total_classes: number;
+    attended: number;
+    percentage: number | null;
+}
 
-export default function RiskListPage() {
-    const [filter, setFilter] = useState<'critical' | 'warning'>('critical');
+export default function RiskDashboardPage() {
+    const [loading, setLoading] = useState(true);
+    const [threshold, setThreshold] = useState(75);
+    const [data, setData] = useState<{
+        at_risk_count: number;
+        total_students: number;
+        students: AtRiskStudent[];
+    } | null>(null);
 
-    const students = useMemo(() => (studentData as Student[]).map(s => {
-        const attendance = s.attendanceRate || (Math.floor(Math.sin(Number(s.rollNumber)) * 20) + 70); // Semi-deterministic mock
-        return {
-            ...s,
-            riskLevel: attendance < 65 ? 'critical' : 'warning',
-            roll: s.rollNumber.toString(),
-            attendance: attendance,
-            contact: attendance < 65 ? "Parents notified" : "Warning pending"
-        };
-    }), []);
+    useEffect(() => {
+        fetchRiskData();
+    }, []);
 
-    const filteredStudents = students.filter(s => s.riskLevel === filter);
+    const [isNoteOpen, setIsNoteOpen] = useState(false);
+    const [selectedStudent, setSelectedStudent] = useState<AtRiskStudent | null>(null);
+    const [noteText, setNoteText] = useState("");
+    const [actionType, setActionType] = useState("");
+
+    const handleAddNote = async () => {
+        if (!selectedStudent || !noteText) return;
+
+        try {
+            const response = await fetch("/api/advisor/notes", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    student_id: selectedStudent.id,
+                    note: noteText,
+                    action_taken: actionType || null,
+                }),
+            });
+
+            if (!response.ok) throw new Error("Failed to add note");
+
+            toast.success("Intervention note added!");
+            setIsNoteOpen(false);
+            setNoteText("");
+            setActionType("");
+        } catch (error) {
+            toast.error("Failed to add note");
+        }
+    };
+
+    const fetchRiskData = async () => {
+        try {
+            setLoading(true);
+            const response = await fetch(`/api/advisor/risks?threshold=${threshold}`);
+            if (response.ok) {
+                const result = await response.json();
+                setData(result);
+            }
+        } catch (error) {
+            console.error("Error fetching risk data:", error);
+            toast.error("Failed to load risk data");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const getAttendanceColor = (percentage: number | null) => {
+        if (percentage === null) return "text-neutral-400";
+        if (percentage < 50) return "text-red-600 dark:text-red-400";
+        if (percentage < 75) return "text-orange-600 dark:text-orange-400";
+        return "text-yellow-600 dark:text-yellow-400";
+    };
 
     return (
-        <div className="space-y-6 pb-20">
-            <div className="space-y-1">
-                <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">At-Risk Students</h1>
-                <p className="text-neutral-500">Students requiring intervention</p>
+        <div className="space-y-6">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-3xl font-bold text-neutral-900 dark:text-neutral-100">At-Risk Students</h1>
+                    <p className="text-neutral-500 mt-1">Monitor students below attendance threshold for intervention.</p>
+                </div>
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
+                        <Label htmlFor="threshold" className="text-sm text-neutral-500">Threshold:</Label>
+                        <Input
+                            id="threshold"
+                            type="number"
+                            value={threshold}
+                            onChange={(e) => setThreshold(parseInt(e.target.value) || 75)}
+                            className="w-20 h-9"
+                            min={50}
+                            max={100}
+                        />
+                        <span className="text-neutral-400">%</span>
+                    </div>
+                    <Button onClick={fetchRiskData} variant="outline" className="gap-2">
+                        <RefreshCw size={16} />
+                        Refresh
+                    </Button>
+                </div>
             </div>
 
-            {/* Filters */}
-            <div className="flex gap-2 p-1 bg-neutral-100 dark:bg-neutral-900 rounded-lg w-fit">
-                <button
-                    onClick={() => setFilter('critical')}
-                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${filter === 'critical'
-                        ? 'bg-white dark:bg-neutral-800 text-red-600 shadow-sm'
-                        : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-300'
-                        }`}
-                >
-                    Critical (&lt;65%)
-                </button>
-                <button
-                    onClick={() => setFilter('warning')}
-                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${filter === 'warning'
-                        ? 'bg-white dark:bg-neutral-800 text-yellow-600 shadow-sm'
-                        : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-300'
-                        }`}
-                >
-                    Warning (&lt;75%)
-                </button>
-            </div>
+            {/* Stats */}
+            {data && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <Card className="p-4 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
+                        <p className="text-sm text-red-600 dark:text-red-400 font-medium">At Risk</p>
+                        <p className="text-3xl font-bold text-red-700 dark:text-red-300">{data.at_risk_count}</p>
+                    </Card>
+                    <Card className="p-4">
+                        <p className="text-sm text-neutral-500">Total Students</p>
+                        <p className="text-3xl font-bold">{data.total_students}</p>
+                    </Card>
+                    <Card className="p-4">
+                        <p className="text-sm text-neutral-500">Risk Rate</p>
+                        <p className="text-3xl font-bold">
+                            {data.total_students > 0 ? Math.round((data.at_risk_count / data.total_students) * 100) : 0}%
+                        </p>
+                    </Card>
+                    <Card className="p-4">
+                        <p className="text-sm text-neutral-500">Threshold</p>
+                        <p className="text-3xl font-bold">&lt; {threshold}%</p>
+                    </Card>
+                </div>
+            )}
 
-            <div className="space-y-4">
-                {filteredStudents.map((student) => (
-                    <Card key={student.id} className="p-4 flex flex-col gap-4">
-                        <Link href={`/advisor/student/${student.id}`} className="flex justify-between items-start">
-                            <div className="flex gap-4">
-                                <Avatar className="h-12 w-12 border-2 border-white shadow-sm">
-                                    <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${student.name}`} />
-                                    <AvatarFallback>{student.name[0]}</AvatarFallback>
-                                </Avatar>
+            {/* Student List */}
+            {loading ? (
+                <div className="flex items-center justify-center py-12">
+                    <Loader2 className="animate-spin text-neutral-400" size={32} />
+                </div>
+            ) : !data || data.students.length === 0 ? (
+                <Card className="p-12 text-center">
+                    <div className="w-16 h-16 mx-auto mb-4 bg-green-50 dark:bg-green-900/20 rounded-full flex items-center justify-center">
+                        <TrendingDown className="text-green-600 dark:text-green-400" size={32} />
+                    </div>
+                    <h3 className="text-lg font-medium text-neutral-900 dark:text-neutral-100">No At-Risk Students</h3>
+                    <p className="text-neutral-500 mt-2">
+                        All students are currently above the {threshold}% attendance threshold.
+                    </p>
+                </Card>
+            ) : (
+                <div className="space-y-3">
+                    {data.students.map((student) => (
+                        <Card key={student.id} className="p-4 flex items-center justify-between hover:border-neutral-300 dark:hover:border-neutral-700 transition-colors">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-full bg-red-50 dark:bg-red-900/30 flex items-center justify-center">
+                                    <AlertTriangle className="text-red-500" size={20} />
+                                </div>
                                 <div>
-                                    <h3 className="font-semibold text-lg text-neutral-900 dark:text-neutral-100">{student.name}</h3>
-                                    <p className="text-sm text-neutral-500 font-mono">{student.roll}</p>
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">{student.name}</h3>
+                                        <span className="font-mono text-xs bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded">
+                                            {student.roll_number}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-3 text-sm text-neutral-500 mt-1">
+                                        {student.email && (
+                                            <span className="flex items-center gap-1">
+                                                <Mail size={12} />
+                                                {student.email}
+                                            </span>
+                                        )}
+                                        {student.semester && <span>Sem {student.semester}</span>}
+                                        {student.department && <span>{student.department}</span>}
+                                    </div>
                                 </div>
                             </div>
-                            <div className={`flex flex-col items-end`}>
-                                <span className={`text-2xl font-bold ${student.riskLevel === 'critical' ? 'text-red-600' : 'text-yellow-600'
-                                    }`}>
-                                    {student.attendance}%
-                                </span>
-                                <span className="text-[10px] text-neutral-400 font-medium uppercase">Attendance</span>
-                            </div>
-                        </Link>
 
-                        <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
-                            <span className="text-xs text-neutral-400 italic">{student.contact}</span>
-                            <div className="flex gap-2">
-                                <Button variant="outline" size="sm" className="h-8 w-8 p-0 rounded-full">
-                                    <Phone size={14} />
+                            <div className="flex flex-col items-end gap-2">
+                                <div className="text-right">
+                                    <p className={`text-2xl font-bold ${getAttendanceColor(student.percentage)}`}>
+                                        {student.percentage !== null ? `${student.percentage}%` : 'N/A'}
+                                    </p>
+                                    <p className="text-xs text-neutral-400">
+                                        {student.attended} / {student.total_classes} classes
+                                    </p>
+                                </div>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                        setSelectedStudent(student);
+                                        setIsNoteOpen(true);
+                                    }}
+                                >
+                                    Log Note
                                 </Button>
-                                <Button variant="outline" size="sm" className="h-8 w-8 p-0 rounded-full">
-                                    <Mail size={14} />
-                                </Button>
-                                <Link href={`/advisor/student/${student.id}`}>
-                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full">
-                                        <ChevronRight size={16} />
-                                    </Button>
-                                </Link>
                             </div>
+                        </Card>
+                    ))}
+                </div>
+            )}
+
+            <Dialog open={isNoteOpen} onOpenChange={setIsNoteOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Add Intervention Note</DialogTitle>
+                        <DialogDescription>
+                            Log action taken for {selectedStudent?.name} ({selectedStudent?.roll_number})
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <Label>Note</Label>
+                            <Input
+                                value={noteText}
+                                onChange={(e) => setNoteText(e.target.value)}
+                                placeholder="E.g. Met with student, Emailed parents..."
+                            />
                         </div>
-                    </Card>
-                ))}
-            </div>
+                        <div className="space-y-2">
+                            <Label>Action Taken (Optional)</Label>
+                            <Select value={actionType} onValueChange={setActionType}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select action type" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="meeting">Meeting</SelectItem>
+                                    <SelectItem value="email">Email</SelectItem>
+                                    <SelectItem value="call">Phone Call</SelectItem>
+                                    <SelectItem value="warning">Official Warning</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="flex justify-end gap-3 pt-4">
+                            <Button variant="outline" onClick={() => setIsNoteOpen(false)}>Cancel</Button>
+                            <Button onClick={handleAddNote}>Save Note</Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
-    )
+    );
 }
+
