@@ -40,7 +40,7 @@ export async function getSession() {
  */
 export async function getCurrentUser(): Promise<AuthUser | null> {
   const { data: { user: authUser } } = await supabase.auth.getUser();
-  
+
   if (!authUser) return null;
 
   const { data: userProfile, error } = await supabase
@@ -104,25 +104,25 @@ export async function signUp(
 
   // Create role-specific records
   if (role === 'student' && metadata?.rollNumber) {
-    await supabase
+    const { error: studentError } = await supabase
       .from('students')
       .insert({
         user_id: authData.user.id,
         roll_number: metadata.rollNumber,
         department_id: metadata.departmentId || null,
-      })
-      .catch(console.error);
+      });
+    if (studentError) console.error('Error creating student record:', studentError);
   }
 
   if (role === 'teacher' && metadata?.employeeId) {
-    await supabase
+    const { error: teacherError } = await supabase
       .from('teachers')
       .insert({
         user_id: authData.user.id,
         employee_id: metadata.employeeId,
         department_id: metadata.departmentId || null,
-      })
-      .catch(console.error);
+      });
+    if (teacherError) console.error('Error creating teacher record:', teacherError);
   }
 
   return authData;
