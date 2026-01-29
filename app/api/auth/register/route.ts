@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 import type { UserRole } from '@/types/database';
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password, full_name, role, roll_number, employee_id, department_id } = await request.json();
+    const { email, password, full_name, role, roll_number, employee_id, department_id, section, batch } = await request.json();
 
     if (!email || !password || !full_name || !role) {
       return NextResponse.json(
@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createServerClient();
+    const supabase = supabaseAdmin;
 
     // Create user in Supabase Auth using Admin API
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
@@ -64,6 +64,8 @@ export async function POST(request: NextRequest) {
           user_id: authData.user.id,
           roll_number,
           department_id: department_id || null,
+          section: section || null,
+          batch: batch || null,
         });
 
       if (studentError) {

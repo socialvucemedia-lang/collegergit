@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase-server';
 
 export async function POST(request: NextRequest) {
     try {
-        const supabase = createServerClient();
+        const supabase = await createServerClient();
         const { from_semester, to_semester, retain_ids } = await request.json();
 
         if (!from_semester || !to_semester) {

@@ -1,20 +1,64 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Search, Users, ChevronRight } from "lucide-react";
+import { Search, Users, ChevronRight, Loader2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import studentData from "@/data/students.json";
+import { supabase } from "@/lib/supabase";
+
+interface Student {
+    id: string;
+    rollNumber: string;
+    name: string;
+    email: string;
+    section: string | null;
+    batch: string | null;
+    semester: number | null;
+    department: string | null;
+}
 
 export default function StudentListPage() {
     const [searchTerm, setSearchTerm] = useState("");
+    const [loading, setLoading] = useState(true);
+    const [students, setStudents] = useState<Student[]>([]);
 
-    const filteredStudents = studentData.filter(student =>
+    useEffect(() => {
+        fetchStudents();
+    }, []);
+
+    const fetchStudents = async () => {
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const response = await fetch("/api/advisor/students", {
+                headers: {
+                    Authorization: `Bearer ${session?.access_token}`,
+                },
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setStudents(data.students || []);
+            }
+        } catch (error) {
+            console.error("Error fetching students:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const filteredStudents = students.filter(student =>
         student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         student.rollNumber.toString().includes(searchTerm)
     );
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <Loader2 className="animate-spin text-neutral-400" size={32} />
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6 pb-20">
@@ -47,7 +91,11 @@ export default function StudentListPage() {
                                     </Avatar>
                                     <div>
                                         <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">{student.name}</h3>
-                                        <p className="text-xs text-neutral-500 font-mono">Roll: {student.rollNumber}</p>
+                                        <div className="flex items-center gap-2 text-xs text-neutral-500">
+                                            <span className="font-mono">Roll: {student.rollNumber}</span>
+                                            {student.section && <span>• Sec {student.section}</span>}
+                                            {student.batch && <span>• {student.batch}</span>}
+                                        </div>
                                     </div>
                                 </div>
                                 <ChevronRight className="h-5 w-5 text-neutral-400" />
@@ -57,7 +105,7 @@ export default function StudentListPage() {
                 ) : (
                     <div className="text-center py-12 text-neutral-500">
                         <Users className="h-12 w-12 mx-auto mb-3 opacity-20" />
-                        <p>No students found matching "{searchTerm}"</p>
+                        <p>No students found {searchTerm && `matching "${searchTerm}"`}</p>
                     </div>
                 )}
             </div>

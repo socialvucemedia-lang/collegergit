@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase-server';
 import type { AttendanceStatus } from '@/types/database';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const supabase = await createServerClient();
     const searchParams = request.nextUrl.searchParams;
     const sessionId = searchParams.get('session_id');
     const studentId = searchParams.get('student_id');
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createServerClient();
+    const supabase = await createServerClient();
 
     // Use upsert to handle duplicate entries
     const { data, error } = await supabase
@@ -103,7 +103,7 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const supabase = createServerClient();
+    const supabase = await createServerClient();
 
     // Prepare records for upsert
     const upsertData = records.map((record: { student_id: string; status: AttendanceStatus; notes?: string }) => ({

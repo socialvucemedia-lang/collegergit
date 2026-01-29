@@ -1,14 +1,29 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Plus, Trash2, Loader2, GripVertical, Clock, MapPin } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useState, useEffect, useCallback } from "react";
+import { Calendar, momentLocalizer, Views, DateLocalizer } from "react-big-calendar";
+import withDragAndDrop from "react-big-calendar/lib/addons/dragAndDrop";
+import moment from "moment";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { Loader2, Plus, GripVertical, Trash2, Save, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
+
+import "react-big-calendar/lib/css/react-big-calendar.css";
+import "react-big-calendar/lib/addons/dragAndDrop/styles.css";
+
+// Setup localizer
+const localizer = momentLocalizer(moment);
+const DnDCalendar = withDragAndDrop(Calendar);
+
+interface Department {
+    id: string;
+    name: string;
+    code: string;
+}
 
 interface Subject {
     id: string;
@@ -18,11 +33,12 @@ interface Subject {
 
 interface Teacher {
     id: string;
-    employee_id: string;
-    users: { full_name: string } | { full_name: string }[];
+    user: {
+        full_name: string;
+    };
 }
 
-interface TimetableSlot {
+interface Slot {
     id: string;
     subject_id: string;
     teacher_id: string | null;
@@ -30,407 +46,345 @@ interface TimetableSlot {
     start_time: string;
     end_time: string;
     room: string | null;
-    section: string | null;
-    subjects: Subject;
-    teachers: Teacher | null;
+    subjects?: { code: string; name: string };
+    teachers?: { users: { full_name: string } };
 }
 
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const TIME_SLOTS = [
-    "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"
-];
-const SECTIONS = ["A", "B", "C", "D"];
-const SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
+// Helper to convert API slot to Calendar Event
+const slotToEvent = (slot: Slot, baseDate: Date) => {
+    // Calculate the date for this slot based on the current week's Sunday
+    const startOfWeek = moment(baseDate).startOf('week').toDate(); // Sunday
+    const slotDate = moment(startOfWeek).add(slot.day_of_week, 'days').toDate();
 
-export default function TimetablePage() {
-    const [slots, setSlots] = useState<TimetableSlot[]>([]);
+    const [startHour, startMinute] = slot.start_time.split(':').map(Number);
+    const [endHour, endMinute] = slot.end_time.split(':').map(Number);
+
+    const start = new Date(slotDate);
+    start.setHours(startHour, startMinute, 0);
+
+    const end = new Date(slotDate);
+    end.setHours(endHour, endMinute, 0);
+
+    return {
+        id: slot.id,
+        title: `${slot.subjects?.code || 'Unknown'} (${slot.room || 'No Room'})`,
+        start,
+        end,
+        resource: slot
+    };
+};
+
+export default function TimetableBuilder() {
+    const [loading, setLoading] = useState(false);
+    const [slots, setSlots] = useState<Slot[]>([]);
+    const [events, setEvents] = useState<any[]>([]);
+    const [departments, setDepartments] = useState<Department[]>([]);
     const [subjects, setSubjects] = useState<Subject[]>([]);
-    const [teachers, setTeachers] = useState<Teacher[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [selectedSection, setSelectedSection] = useState("A");
-    const [selectedSemester, setSelectedSemester] = useState("1");
-    const [isDialogOpen, setIsDialogOpen] = useState(false);
-    const [selectedSlot, setSelectedSlot] = useState<{ day: number; time: string } | null>(null);
-    const [formData, setFormData] = useState({
-        subject_id: "",
-        teacher_id: "",
-        room: "",
-        end_time: "",
-    });
+
+    // Filters
+    const [selectedDepartment, setSelectedDepartment] = useState<string>("");
+    const [selectedSemester, setSelectedSemester] = useState<string>("1");
+    const [selectedSection, setSelectedSection] = useState<string>("A");
+    const [selectedBatch, setSelectedBatch] = useState<string>("all");
+
+    // Dragging State
     const [draggedSubject, setDraggedSubject] = useState<Subject | null>(null);
 
+    // Initial Fetch
     useEffect(() => {
-        fetchTimetable();
-        fetchSubjects();
-        fetchTeachers();
-    }, [selectedSection, selectedSemester]);
+        fetchDepartments();
+    }, []);
 
-    const fetchTimetable = async () => {
+    // Fetch subjects when filters change
+    useEffect(() => {
+        if (selectedDepartment && selectedSemester) {
+            fetchSubjects();
+        }
+    }, [selectedDepartment, selectedSemester]);
+
+    // Fetch timetable when all filters are ready
+    useEffect(() => {
+        if (selectedDepartment && selectedSemester && selectedSection) {
+            fetchTimetable();
+        }
+    }, [selectedDepartment, selectedSemester, selectedSection, selectedBatch]);
+
+    const fetchDepartments = async () => {
         try {
-            setLoading(true);
-            const response = await fetch(`/api/timetable?section=${selectedSection}&semester=${selectedSemester}`);
-            if (response.ok) {
-                const data = await response.json();
-                setSlots(data.slots || []);
+            const res = await fetch("/api/departments");
+            if (res.ok) {
+                const data = await res.json();
+                setDepartments(data.departments || []);
+                if (data.departments?.[0]) {
+                    setSelectedDepartment(data.departments[0].id);
+                }
             }
         } catch (error) {
-            console.error("Error fetching timetable:", error);
-        } finally {
-            setLoading(false);
+            console.error("Error fetching departments", error);
         }
     };
 
     const fetchSubjects = async () => {
         try {
-            const response = await fetch(`/api/subjects?semester=${selectedSemester}`);
-            if (response.ok) {
-                const data = await response.json();
+            const params = new URLSearchParams({
+                semester: selectedSemester,
+                department_id: selectedDepartment
+            });
+            const res = await fetch(`/api/subjects?${params}`);
+            if (res.ok) {
+                const data = await res.json();
                 setSubjects(data.subjects || []);
             }
         } catch (error) {
-            console.error("Error fetching subjects:", error);
+            console.error("Error fetching subjects", error);
         }
     };
 
-    const fetchTeachers = async () => {
+    const fetchTimetable = async () => {
         try {
-            const response = await fetch("/api/teachers");
-            if (response.ok) {
-                const data = await response.json();
-                setTeachers(data.teachers || []);
+            setLoading(true);
+            const params = new URLSearchParams({
+                department_id: selectedDepartment,
+                semester: selectedSemester,
+                section: selectedSection
+            });
+            if (selectedBatch && selectedBatch !== "all") {
+                params.append("batch", selectedBatch);
+            }
+
+            const res = await fetch(`/api/timetable?${params}`);
+            if (res.ok) {
+                const data = await res.json();
+                setSlots(data.slots || []);
+                // Convert to events
+                const evts = (data.slots || []).map((s: Slot) => slotToEvent(s, new Date()));
+                setEvents(evts);
             }
         } catch (error) {
-            console.error("Error fetching teachers:", error);
+            console.error("Error fetching timetable", error);
+            toast.error("Failed to fetch timetable");
+        } finally {
+            setLoading(false);
         }
     };
 
-    const handleCellClick = (day: number, time: string) => {
-        setSelectedSlot({ day, time });
-        const endHour = parseInt(time.split(":")[0]) + 1;
-        setFormData({
-            subject_id: "",
-            teacher_id: "",
-            room: "",
-            end_time: `${endHour.toString().padStart(2, "0")}:00`,
-        });
-        setIsDialogOpen(true);
-    };
-
-    const handleDrop = async (day: number, time: string, subject: Subject) => {
-        const endHour = parseInt(time.split(":")[0]) + 1;
+    const handleSlotCreate = async (subject: Subject, start: Date, end: Date) => {
         try {
-            const response = await fetch("/api/timetable", {
+            const day_of_week = moment(start).day();
+            const start_time = moment(start).format("HH:mm:00");
+            const end_time = moment(end).format("HH:mm:00");
+
+            const payload = {
+                subject_id: subject.id,
+                day_of_week,
+                start_time,
+                end_time,
+                room: "101", // Default room, editable later
+                section: selectedSection,
+                semester: parseInt(selectedSemester),
+                batch: selectedBatch !== "all" ? selectedBatch : null
+            };
+
+            const res = await fetch("/api/timetable", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    subject_id: subject.id,
-                    day_of_week: day,
-                    start_time: time,
-                    end_time: `${endHour.toString().padStart(2, "0")}:00`,
-                    section: selectedSection,
-                    semester: parseInt(selectedSemester),
-                }),
+                body: JSON.stringify(payload)
             });
 
-            const data = await response.json();
-
-            if (!response.ok) {
-                if (data.conflicts && data.conflicts.length > 0) {
-                    data.conflicts.forEach((c: string) => toast.error(c));
-                } else {
-                    throw new Error(data.error || "Failed to add slot");
-                }
-                return;
+            if (res.ok) {
+                toast.success("Class scheduled");
+                fetchTimetable();
+            } else {
+                const err = await res.json();
+                toast.error(err.error || "Failed to schedule");
             }
-
-            toast.success(`Added ${subject.code} to timetable`);
-            fetchTimetable();
-        } catch (error: any) {
-            toast.error(error.message || "Failed to add slot");
-        }
-        setDraggedSubject(null);
-    };
-
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!selectedSlot || !formData.subject_id) return;
-
-        try {
-            const response = await fetch("/api/timetable", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    subject_id: formData.subject_id,
-                    teacher_id: formData.teacher_id || null,
-                    day_of_week: selectedSlot.day,
-                    start_time: selectedSlot.time,
-                    end_time: formData.end_time,
-                    room: formData.room || null,
-                    section: selectedSection,
-                    semester: parseInt(selectedSemester),
-                }),
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                if (data.conflicts && data.conflicts.length > 0) {
-                    data.conflicts.forEach((c: string) => toast.error(c));
-                } else {
-                    throw new Error(data.error || "Failed to add slot");
-                }
-                return;
-            }
-
-            toast.success("Lecture added to timetable!");
-            setIsDialogOpen(false);
-            fetchTimetable();
-        } catch (error: any) {
-            toast.error(error.message || "Failed to add slot");
-        }
-    };
-
-
-    const handleDelete = async (id: string) => {
-        try {
-            const response = await fetch(`/api/timetable/${id}`, { method: "DELETE" });
-            if (!response.ok) throw new Error("Failed to delete");
-            toast.success("Lecture removed!");
-            fetchTimetable();
         } catch (error) {
-            toast.error("Failed to remove lecture");
+            toast.error("Error scheduling class");
         }
     };
 
-    const getSlotForCell = (day: number, time: string) => {
-        return slots.find((s) => s.day_of_week === day && s.start_time === time);
+    const handleEventMove = async ({ event, start, end }: any) => {
+        const slot = event.resource as Slot;
+        const day_of_week = moment(start).day();
+        const start_time = moment(start).format("HH:mm:00");
+        const end_time = moment(end).format("HH:mm:00");
+
+        try {
+            const res = await fetch(`/api/timetable/${slot.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    day_of_week,
+                    start_time,
+                    end_time
+                })
+            });
+
+            if (res.ok) {
+                toast.success("Class rescheduled");
+                fetchTimetable();
+            } else {
+                toast.error("Failed to reschedule class");
+            }
+        } catch (error) {
+            toast.error("Error updating class");
+        }
     };
 
-    const getTeacherName = (teacher: Teacher | null) => {
-        if (!teacher) return null;
-        const users = teacher.users;
-        if (Array.isArray(users)) {
-            return users[0]?.full_name || null;
+    const handleSelectEvent = async (event: any) => {
+        const slot = event.resource as Slot;
+        if (confirm(`Delete ${event.title}?`)) {
+            try {
+                const res = await fetch(`/api/timetable/${slot.id}`, {
+                    method: "DELETE"
+                });
+                if (res.ok) {
+                    toast.success("Class removed");
+                    setEvents(prev => prev.filter(e => e.id !== slot.id));
+                } else {
+                    toast.error("Failed to delete class");
+                }
+            } catch (error) {
+                toast.error("Error deleting class");
+            }
         }
-        return users?.full_name || null;
     };
+
+    const handleDropFromOutside = useCallback(
+        ({ start, end }: { start: Date; end: Date }) => {
+            if (draggedSubject) {
+                handleSlotCreate(draggedSubject, start, end);
+                setDraggedSubject(null);
+            }
+        },
+        [draggedSubject, selectedSection, selectedSemester, selectedBatch]
+    );
 
     return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold text-neutral-900 dark:text-neutral-100">Timetable Builder</h1>
-                    <p className="text-neutral-500 mt-1">Drag subjects onto the grid or click a cell to add lectures.</p>
+        <div className="space-y-6 h-[calc(100vh-100px)] flex flex-col">
+            <div className="flex items-center justify-between shrink-0">
+                <div className="space-y-1">
+                    <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">Timetable Builder</h1>
+                    <p className="text-neutral-500">Drag subjects onto the calendar to schedule classes</p>
                 </div>
-                <div className="flex gap-2">
-                    <Select value={selectedSemester} onValueChange={setSelectedSemester}>
-                        <SelectTrigger className="w-[140px]">
-                            <SelectValue placeholder="Semester" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {SEMESTERS.map((sem) => (
-                                <SelectItem key={sem} value={sem.toString()}>Semester {sem}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <Select value={selectedSection} onValueChange={setSelectedSection}>
-                        <SelectTrigger className="w-[120px]">
-                            <SelectValue placeholder="Section" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {SECTIONS.map((sec) => (
-                                <SelectItem key={sec} value={sec}>Section {sec}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </div>
+                {loading && <Loader2 className="animate-spin text-neutral-400" />}
             </div>
 
-            <div className="flex gap-6">
+            {/* Filters */}
+            <Card className="p-4 shrink-0">
+                <div className="flex flex-wrap gap-4 items-end">
+                    <div className="space-y-2">
+                        <Label>Department</Label>
+                        <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
+                            <SelectTrigger className="w-[180px]">
+                                <SelectValue placeholder="Department" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {departments.map(d => (
+                                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="space-y-2">
+                        <Label>Semester</Label>
+                        <Select value={selectedSemester} onValueChange={setSelectedSemester}>
+                            <SelectTrigger className="w-[120px]">
+                                <SelectValue placeholder="Semester" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {[1, 2, 3, 4, 5, 6, 7, 8].map(s => (
+                                    <SelectItem key={s} value={s.toString()}>Sem {s}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="space-y-2">
+                        <Label>Section</Label>
+                        <Select value={selectedSection} onValueChange={setSelectedSection}>
+                            <SelectTrigger className="w-[120px]">
+                                <SelectValue placeholder="Section" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {["A", "B", "C", "D"].map(s => (
+                                    <SelectItem key={s} value={s}>Sec {s}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="space-y-2">
+                        <Label>Batch (Optional)</Label>
+                        <Select value={selectedBatch} onValueChange={setSelectedBatch}>
+                            <SelectTrigger className="w-[150px]">
+                                <SelectValue placeholder="All Batches" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Batches</SelectItem>
+                                {["A1", "A2", "A3", "B1", "B2", "B3"].map(b => (
+                                    <SelectItem key={b} value={b}>{b}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
+            </Card>
+
+            <div className="flex gap-6 flex-1 min-h-0">
                 {/* Sidebar - Draggable Subjects */}
-                <Card className="w-64 p-4 h-fit sticky top-4">
-                    <h3 className="font-semibold mb-3 text-neutral-900 dark:text-neutral-100">Subjects</h3>
-                    <p className="text-xs text-neutral-500 mb-3">Drag onto the grid</p>
-                    <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                        {subjects.map((subject) => (
+                <Card className="w-64 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto">
+                    <h3 className="font-semibold text-sm uppercase text-neutral-500 mb-2">Subjects</h3>
+                    {subjects.length === 0 ? (
+                        <p className="text-sm text-neutral-400 text-center italic">No subjects found for this semester.</p>
+                    ) : (
+                        subjects.map(sub => (
                             <div
-                                key={subject.id}
+                                key={sub.id}
                                 draggable
-                                onDragStart={() => setDraggedSubject(subject)}
-                                onDragEnd={() => setDraggedSubject(null)}
-                                className="flex items-center gap-2 p-2 bg-neutral-50 dark:bg-neutral-800 rounded-lg cursor-grab active:cursor-grabbing hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
+                                onDragStart={() => setDraggedSubject(sub)}
+                                className="p-3 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg cursor-grab hover:shadow-md transition-all active:cursor-grabbing flex items-center justify-between group"
                             >
-                                <GripVertical size={14} className="text-neutral-400" />
                                 <div>
-                                    <p className="font-medium text-sm">{subject.code}</p>
-                                    <p className="text-xs text-neutral-500 truncate">{subject.name}</p>
+                                    <p className="font-bold text-sm text-neutral-900 dark:text-neutral-100">{sub.code}</p>
+                                    <p className="text-xs text-neutral-500 truncate max-w-[150px]" title={sub.name}>{sub.name}</p>
                                 </div>
+                                <GripVertical size={16} className="text-neutral-400 group-hover:text-neutral-600" />
                             </div>
-                        ))}
+                        ))
+                    )}
+
+                    <div className="mt-auto p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs rounded-lg flex gap-2">
+                        <AlertCircle size={16} className="shrink-0" />
+                        <p>Drag subjects to the grid to schedule. Click an event to delete.</p>
                     </div>
                 </Card>
 
-                {/* Timetable Grid */}
-                <div className="flex-1 overflow-x-auto">
-                    {loading ? (
-                        <div className="flex items-center justify-center py-20">
-                            <Loader2 className="animate-spin text-neutral-400" size={32} />
-                        </div>
-                    ) : (
-                        <div className="min-w-[800px]">
-                            {/* Header Row */}
-                            <div className="grid grid-cols-7 gap-1 mb-1">
-                                <div className="p-2 text-center text-sm font-medium text-neutral-500">Time</div>
-                                {DAYS.map((day) => (
-                                    <div key={day} className="p-2 text-center text-sm font-medium text-neutral-700 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 rounded">
-                                        {day}
-                                    </div>
-                                ))}
-                            </div>
-
-                            {/* Time Rows */}
-                            {TIME_SLOTS.map((time) => (
-                                <div key={time} className="grid grid-cols-7 gap-1 mb-1">
-                                    <div className="p-2 text-center text-xs text-neutral-500 flex items-center justify-center">
-                                        {time}
-                                    </div>
-                                    {DAYS.map((_, dayIndex) => {
-                                        const slot = getSlotForCell(dayIndex, time);
-                                        return (
-                                            <div
-                                                key={dayIndex}
-                                                onClick={() => !slot && handleCellClick(dayIndex, time)}
-                                                onDragOver={(e) => { e.preventDefault(); }}
-                                                onDrop={() => draggedSubject && handleDrop(dayIndex, time, draggedSubject)}
-                                                className={`min-h-[60px] rounded border-2 border-dashed transition-all ${slot
-                                                    ? "border-transparent bg-blue-50 dark:bg-blue-900/30"
-                                                    : draggedSubject
-                                                        ? "border-blue-300 bg-blue-50/50 dark:bg-blue-900/20"
-                                                        : "border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 cursor-pointer"
-                                                    }`}
-                                            >
-                                                {slot && (
-                                                    <div className="p-2 h-full flex flex-col justify-between group">
-                                                        <div>
-                                                            <p className="font-semibold text-sm text-blue-700 dark:text-blue-400">{slot.subjects?.code}</p>
-                                                            <p className="text-xs text-neutral-500 truncate">{slot.subjects?.name}</p>
-                                                        </div>
-                                                        <div className="flex items-center justify-between mt-1">
-                                                            <div className="flex items-center gap-1 text-xs text-neutral-400">
-                                                                {slot.room && (
-                                                                    <>
-                                                                        <MapPin size={10} />
-                                                                        <span>{slot.room}</span>
-                                                                    </>
-                                                                )}
-                                                            </div>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity text-red-500"
-                                                                onClick={(e) => { e.stopPropagation(); handleDelete(slot.id); }}
-                                                            >
-                                                                <Trash2 size={12} />
-                                                            </Button>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                {/* Calendar Grid */}
+                <Card className="flex-1 p-4 bg-white dark:bg-neutral-900 overflow-hidden">
+                    <DnDCalendar
+                        localizer={localizer}
+                        events={events}
+                        startAccessor={(event: any) => new Date(event.start)}
+                        endAccessor={(event: any) => new Date(event.end)}
+                        defaultView={Views.WEEK}
+                        views={[Views.WEEK, Views.DAY]}
+                        step={60}
+                        timeslots={1}
+                        min={new Date(0, 0, 0, 8, 0, 0)} // Start at 8 AM
+                        max={new Date(0, 0, 0, 18, 0, 0)} // End at 6 PM
+                        selectable
+                        resizable
+                        onEventDrop={handleEventMove}
+                        onEventResize={handleEventMove}
+                        onSelectEvent={handleSelectEvent}
+                        onDropFromOutside={({ start, end }: { start: string | Date; end: string | Date }) => {
+                            handleDropFromOutside({ start: new Date(start), end: new Date(end) });
+                        }}
+                        dragFromOutsideItem={() => draggedSubject || {}}
+                        draggableAccessor={() => true}
+                        className="h-full font-sans text-sm"
+                    />
+                </Card>
             </div>
-
-            {/* Add Slot Dialog */}
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Add Lecture</DialogTitle>
-                        <DialogDescription>
-                            {selectedSlot && `${DAYS[selectedSlot.day]} at ${selectedSlot.time}`}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <div className="space-y-2">
-                            <Label>Subject *</Label>
-                            <Select
-                                value={formData.subject_id}
-                                onValueChange={(val: string) => setFormData({ ...formData, subject_id: val })}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select subject" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {subjects.map((subject) => (
-                                        <SelectItem key={subject.id} value={subject.id}>
-                                            {subject.code} - {subject.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label>Teacher (Optional)</Label>
-                            <Select
-                                value={formData.teacher_id}
-                                onValueChange={(val: string) => setFormData({ ...formData, teacher_id: val })}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select teacher" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {teachers.map((teacher) => (
-                                        <SelectItem key={teacher.id} value={teacher.id}>
-                                            {getTeacherName(teacher) || teacher.employee_id}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>End Time</Label>
-                                <Select
-                                    value={formData.end_time}
-                                    onValueChange={(val: string) => setFormData({ ...formData, end_time: val })}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {TIME_SLOTS.filter((t) => selectedSlot && t > selectedSlot.time).map((time) => (
-                                            <SelectItem key={time} value={time}>{time}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Room</Label>
-                                <Input
-                                    value={formData.room}
-                                    onChange={(e) => setFormData({ ...formData, room: e.target.value })}
-                                    placeholder="e.g., Lab 101"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="flex justify-end gap-3 pt-4">
-                            <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
-                                Cancel
-                            </Button>
-                            <Button type="submit">Add Lecture</Button>
-                        </div>
-                    </form>
-                </DialogContent>
-            </Dialog>
         </div>
     );
 }

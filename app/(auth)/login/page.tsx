@@ -1,5 +1,7 @@
 "use client";
 
+
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, ShieldCheck, GraduationCap, Users, AlertCircle } from 'lucide-react';
@@ -46,7 +48,7 @@ export default function LoginPage() {
         try {
             // Sign in with Supabase Auth
             const { user: authUser } = await signIn(credentials.email, credentials.password);
-            
+
             if (!authUser) {
                 throw new Error('Authentication failed');
             }
@@ -54,7 +56,7 @@ export default function LoginPage() {
             // Wait a bit for auth state to propagate, then refresh user profile
             await new Promise(resolve => setTimeout(resolve, 200));
             await refreshUser();
-            
+
             // Get user profile to verify role
             const { supabase } = await import('@/lib/supabase');
             const { data: userProfile, error: profileError } = await supabase
@@ -87,9 +89,9 @@ export default function LoginPage() {
                 await signOut();
                 throw new Error(`This account is registered as ${userProfile.role}, not ${selectedRole}. Please select the correct role or contact an administrator to update your role.`);
             }
-            
+
             toast.success('Logged in successfully');
-            
+
             // Redirect to dashboard
             router.push(`/${selectedRole}`);
         } catch (err: any) {
@@ -206,7 +208,15 @@ export default function LoginPage() {
                                                 />
                                             </div>
                                             <div className="space-y-2">
-                                                <Label htmlFor="password">Password</Label>
+                                                <div className="flex items-center justify-between">
+                                                    <Label htmlFor="password">Password</Label>
+                                                    <Link
+                                                        href="/forgot-password"
+                                                        className="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-300 transition-colors"
+                                                    >
+                                                        Forgot password?
+                                                    </Link>
+                                                </div>
                                                 <Input
                                                     id="password"
                                                     type="password"
@@ -226,8 +236,8 @@ export default function LoginPage() {
                                         </div>
                                     )}
 
-                                    <Button 
-                                        type="submit" 
+                                    <Button
+                                        type="submit"
                                         disabled={isLoading}
                                         className="w-full bg-neutral-900 text-white dark:bg-white dark:text-black hover:bg-neutral-800 dark:hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >

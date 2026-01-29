@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Clock, MapPin, Loader2, Calendar, Coffee, BookOpen } from "lucide-react";
+import { Clock, MapPin, Loader2, Calendar, Coffee, BookOpen, XCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +37,25 @@ export default function StudentTimetablePage() {
         semester: null,
     });
 
+    const [error, setError] = useState<string | null>(null);
+
+    const handleFixProfile = async () => {
+        setLoading(true);
+        try {
+            const res = await fetch('/api/debug/fix-student');
+            if (res.ok) {
+                await fetchTimetable();
+                setError(null);
+            } else {
+                setError("Failed to auto-fix profile. Please contact admin.");
+            }
+        } catch (err) {
+            setError("Connection error during fix.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const today = new Date().getDay();
     const currentTime = new Date().toTimeString().slice(0, 5);
 
@@ -46,6 +65,7 @@ export default function StudentTimetablePage() {
 
     const fetchTimetable = async () => {
         try {
+            setError(null);
             const { data: { session } } = await supabase.auth.getSession();
             if (!session?.user) return;
 
@@ -58,6 +78,7 @@ export default function StudentTimetablePage() {
 
             if (studentError || !student) {
                 console.error("Student profile not found");
+                setError("profile_missing");
                 setLoading(false);
                 return;
             }
@@ -142,6 +163,28 @@ export default function StudentTimetablePage() {
         return (
             <div className="flex h-96 items-center justify-center">
                 <Loader2 className="animate-spin text-neutral-400" size={32} />
+            </div>
+        );
+    }
+
+    if (error === "profile_missing") {
+        return (
+            <div className="flex flex-col items-center justify-center h-96 space-y-4 text-center">
+                <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-full">
+                    <XCircle className="text-red-500" size={48} />
+                </div>
+                <div>
+                    <h2 className="text-xl font-bold">Student Profile Not Found</h2>
+                    <p className="text-neutral-500 max-w-xs mx-auto">
+                        We couldn&apos;t find your student details. This usually happens if the registration was interrupted.
+                    </p>
+                </div>
+                <button
+                    onClick={handleFixProfile}
+                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+                >
+                    Fix My Profile automatically
+                </button>
             </div>
         );
     }

@@ -1,24 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
     try {
-        const supabase = createServerClient();
+        const supabase = await createServerClient();
         const searchParams = request.nextUrl.searchParams;
         const department_id = searchParams.get('department_id');
         const semester = searchParams.get('semester');
         const section = searchParams.get('section');
+        const batch = searchParams.get('batch');
 
-        let query = supabase
-            .from('timetable_slots')
-            .select(`
+        // Build the select query dynamically based on whether we need to filter by department
+        let selectQuery = `
         *,
-        subjects (
+        subjects${department_id ? '!inner' : ''} (
           id,
           code,
-          name
+          name,
+          department_id
         ),
         teachers (
           id,
@@ -27,12 +28,16 @@ export async function GET(request: NextRequest) {
             full_name
           )
         )
-      `)
+      `;
+
+        let query = supabase
+            .from('timetable_slots')
+            .select(selectQuery)
             .order('day_of_week', { ascending: true })
             .order('start_time', { ascending: true });
 
         if (department_id) {
-            query = query.eq('department_id', department_id);
+            query = query.eq('subjects.department_id', department_id);
         }
 
         if (semester) {
@@ -43,9 +48,14 @@ export async function GET(request: NextRequest) {
             query = query.eq('section', section);
         }
 
+        if (batch) {
+            query = query.eq('batch', batch);
+        }
+
         const { data, error } = await query;
 
         if (error) {
+            console.error('Database error:', error);
             return NextResponse.json({ error: error.message }, { status: 500 });
         }
 
@@ -58,9 +68,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
     try {
-        const supabase = createServerClient();
+        const supabase = await createServerClient();
         const body = await request.json();
-        const { subject_id, teacher_id, day_of_week, start_time, end_time, room, section, semester, department_id } = body;
+        const { subject_id, teacher_id, day_of_week, start_time, end_time, room, section, semester, department_id, batch } = body;
 
         if (!subject_id || day_of_week === undefined || day_of_week === null || !start_time || !end_time) {
             return NextResponse.json(
@@ -90,6 +100,7 @@ export async function POST(request: NextRequest) {
                 .gte('end_time', start_time);
 
             if (teacherConflicts && teacherConflicts.length > 0) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const conflict = teacherConflicts[0] as any;
                 const teacherName = conflict.teachers?.users?.full_name || 'This teacher';
                 conflicts.push(`${teacherName} is already teaching ${conflict.subjects?.code || 'another class'} in Section ${conflict.section} at this time`);
@@ -111,6 +122,7 @@ export async function POST(request: NextRequest) {
                 .gte('end_time', start_time);
 
             if (roomConflicts && roomConflicts.length > 0) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const conflict = roomConflicts[0] as any;
                 conflicts.push(`Room ${room} is already booked for ${conflict.subjects?.code || 'another class'} (Section ${conflict.section}) at this time`);
             }
@@ -128,6 +140,7 @@ export async function POST(request: NextRequest) {
                 .gte('end_time', start_time);
 
             if (slotConflicts && slotConflicts.length > 0) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const conflict = slotConflicts[0] as any;
                 conflicts.push(`This time slot already has ${conflict.subjects?.code || 'a class'} scheduled for Section ${section}`);
             }
@@ -152,6 +165,8 @@ export async function POST(request: NextRequest) {
                 room: room || null,
                 section: section || null,
                 semester: semester || null,
+                // department_id is derived from subject, not stored in timetable_slots
+                batch: batch || null,
             })
             .select(`
         *,

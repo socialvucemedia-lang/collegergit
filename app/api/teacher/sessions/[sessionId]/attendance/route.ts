@@ -1,6 +1,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase-server';
 
 export async function GET(
     request: NextRequest,
@@ -8,7 +8,7 @@ export async function GET(
 ) {
     try {
         const { sessionId } = await params;
-        const supabase = createServerClient();
+        const supabase = await createServerClient();
 
         // Get token from header
         const authHeader = request.headers.get('Authorization');
@@ -62,7 +62,16 @@ export async function GET(
         }
 
         // 3. Fetch Students with flexible filtering
-        let studentQuery = supabase
+        // Logic:
+        // 1. Try Strict Filter (Section + Batch + Semester + Department)
+        // 2. If 0 results, Try Department + Semester (Ignore Section/Batch)
+        // 3. If 0 results, Try Department Only (Ignore Semester)
+
+        let students: any[] = [];
+        let error: any = null;
+
+        // --- STRATEGY 1: STRICT FILTER ---
+        let query1 = supabase
             .from('students')
             .select(`
                 id,
@@ -77,39 +86,21 @@ export async function GET(
                 )
             `);
 
-        // Apply filters only if they exist and are useful
-        // We'll build a set of filters that MUST match, but we'll be careful with section/batch
+        if (subject.department_id) query1 = query1.eq('department_id', subject.department_id);
+        if (subject.semester) query1 = query1.eq('semester', subject.semester);
+        if (session.section) query1 = query1.eq('section', session.section);
+        if (session.batch) query1 = query1.eq('batch', session.batch);
 
-        // Always filter by department if possible
-        if (subject.department_id) {
-            studentQuery = studentQuery.eq('department_id', subject.department_id);
-        }
+        const { data: data1, error: error1 } = await query1;
+        if (error1) error = error1;
 
-        // SEMESTER FILTER: If students have null semester, they might still belong to this subject
-        // We'll attempt to match semester, but if we find 0 students, we might want to relax it
-        if (subject.semester) {
-            studentQuery = studentQuery.eq('semester', subject.semester);
-        }
+        if (data1 && data1.length > 0) {
+            students = data1;
+        } else {
+            console.log(`[Attendance] Strategy 1 (Strict) returned 0 students. Trying Strategy 2...`);
 
-        // SECTION FILTER
-        if (session.section) {
-            studentQuery = studentQuery.eq('section', session.section);
-        }
-
-        // BATCH FILTER
-        if (session.batch) {
-            studentQuery = studentQuery.eq('batch', session.batch);
-        }
-
-        let { data: students, error: studentsError } = await studentQuery;
-
-        // --- FALLBACK LOGIC ---
-        // If 0 students found with strict filters, try to find students in the same department/semester
-        // ignoring section/batch (maybe they aren't assigned yet)
-        if (!studentsError && (!students || students.length === 0)) {
-            console.log(`No students found for Session ${sessionId} with strict filters. Trying fallback...`);
-
-            let fallbackQuery = supabase
+            // --- STRATEGY 2: RELAXED (Dept + Sem only) ---
+            let query2 = supabase
                 .from('students')
                 .select(`
                     id,
@@ -118,49 +109,52 @@ export async function GET(
                     batch,
                     semester,
                     department_id,
-                    users (
-                        full_name,
-                        email
-                    )
+                    users (full_name, email)
                 `);
 
-            if (subject.department_id) {
-                fallbackQuery = fallbackQuery.eq('department_id', subject.department_id);
-            }
+            if (subject.department_id) query2 = query2.eq('department_id', subject.department_id);
+            // We still filter by semester if it exists, hoping to at least match that
+            if (subject.semester) query2 = query2.eq('semester', subject.semester);
 
-            // If semester mismatch was the issue, try ignoring it or using a more permissive one
-            // For now, let's keep department and just ignore section/batch/semester if needed
-            // Actually, let's try just department + semester first
-            if (subject.semester) {
-                fallbackQuery = fallbackQuery.eq('semester', subject.semester);
-            }
+            const { data: data2, error: error2 } = await query2;
+            if (error2) error = error2;
 
-            const { data: fallbackStudents, error: fallbackError } = await fallbackQuery;
+            if (data2 && data2.length > 0) {
+                students = data2;
+                console.log(`[Attendance] Strategy 2 (Dept+Sem) found ${students.length} students.`);
+            } else {
+                console.log(`[Attendance] Strategy 2 returned 0 students. Trying Strategy 3...`);
 
-            if (!fallbackError && fallbackStudents && fallbackStudents.length > 0) {
-                students = fallbackStudents;
-                console.log(`Fallback successful: Found ${students?.length || 0} students by ignoring section/batch.`);
-            } else if (subject.department_id) {
-                // Last resort: Just show all students in the department
-                const { data: deptStudents } = await supabase
-                    .from('students')
-                    .select(`
-                        id,
-                        roll_number,
-                        section,
-                        batch,
-                        semester,
-                        department_id,
-                        users (full_name, email)
-                    `)
-                    .eq('department_id', subject.department_id);
+                // --- STRATEGY 3: WIDE OPEN (Dept only) ---
+                // Only if department is known, otherwise this is too dangerous (shows whole college)
+                if (subject.department_id) {
+                    let query3 = supabase
+                        .from('students')
+                        .select(`
+                            id,
+                            roll_number,
+                            section,
+                            batch,
+                            semester,
+                            department_id,
+                            users (full_name, email)
+                        `)
+                        .eq('department_id', subject.department_id);
 
-                if (deptStudents && deptStudents.length > 0) {
-                    students = deptStudents;
-                    console.log(`Department fallback: Found ${students?.length || 0} students.`);
+                    const { data: data3, error: error3 } = await query3;
+                    if (error3) error = error3;
+
+                    if (data3 && data3.length > 0) {
+                        students = data3;
+                        console.log(`[Attendance] Strategy 3 (Dept Only) found ${students.length} students.`);
+                    } else {
+                        console.log(`[Attendance] All strategies failed. No students found.`);
+                    }
                 }
             }
         }
+
+        const studentsError = error;
 
         if (studentsError) {
             console.error('Error fetching students:', studentsError);
@@ -208,7 +202,7 @@ export async function POST(
 ) {
     try {
         const { sessionId } = await params;
-        const supabase = createServerClient();
+        const supabase = await createServerClient();
         const { records } = await request.json(); // Array of { student_id, status }
 
         if (!Array.isArray(records)) {

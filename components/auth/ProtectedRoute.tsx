@@ -33,8 +33,18 @@ export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) 
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-neutral-500">Loading...</div>
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4">
+        <div className="text-neutral-500 animate-pulse">Loading portal...</div>
+        {/* Fallback for stuck loading */}
+        <button
+          onClick={() => {
+            // Force verify by redirecting to login explicitly
+            window.location.href = '/login';
+          }}
+          className="text-xs text-neutral-400 hover:text-red-500 underline transition-colors"
+        >
+          Stuck loading? Click here
+        </button>
       </div>
     );
   }

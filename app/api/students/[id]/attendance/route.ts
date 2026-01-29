@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase-server';
 
 export async function GET(
   request: NextRequest,
@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const supabase = createServerClient();
+    const supabase = await createServerClient();
     const searchParams = request.nextUrl.searchParams;
     const subjectId = searchParams.get('subject_id');
     const startDate = searchParams.get('start_date');

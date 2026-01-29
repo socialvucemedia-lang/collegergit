@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Upload, Users, ArrowRight, Check, X, Loader2, AlertTriangle, GraduationCap } from "lucide-react";
+import { Upload, Users, ArrowRight, Check, X, Loader2, AlertTriangle, GraduationCap, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,7 @@ interface Student {
 const SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
 
 export default function StudentsPage() {
-    const [activeTab, setActiveTab] = useState<'import' | 'promote'>('import');
+    const [activeTab, setActiveTab] = useState<'import' | 'promote' | 'departments'>('import');
     const [uploading, setUploading] = useState(false);
     const [promoting, setPromoting] = useState(false);
     const [students, setStudents] = useState<Student[]>([]);
@@ -28,6 +28,10 @@ export default function StudentsPage() {
     const [fromSem, setFromSem] = useState<string>("1");
     const [toSem, setToSem] = useState<string>("2");
     const [retainIds, setRetainIds] = useState<Set<string>>(new Set());
+    const [departments, setDepartments] = useState<any[]>([]);
+    const [selectedDept, setSelectedDept] = useState<string>("");
+    const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
+    const [assigning, setAssigning] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -35,6 +39,13 @@ export default function StudentsPage() {
             fetchStudentsBySemester();
         }
     }, [activeTab, fromSem]);
+
+    useEffect(() => {
+        if (activeTab === 'departments') {
+            fetchUnassignedStudents();
+            fetchDepartments();
+        }
+    }, [activeTab]);
 
     const fetchStudentsBySemester = async () => {
         setLoading(true);
@@ -49,6 +60,83 @@ export default function StudentsPage() {
             console.error("Error fetching students:", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchDepartments = async () => {
+        try {
+            const response = await fetch('/api/departments');
+            if (response.ok) {
+                const data = await response.json();
+                setDepartments(data.departments || []);
+            }
+        } catch (error) {
+            console.error("Error fetching departments:", error);
+        }
+    };
+
+    const fetchUnassignedStudents = async () => {
+        setLoading(true);
+        try {
+            const response = await fetch(`/api/students?unassigned=true`);
+            if (response.ok) {
+                const data = await response.json();
+                setStudents(data.students || []);
+                setSelectedStudents(new Set()); // Reset selections
+            }
+        } catch (error) {
+            console.error("Error fetching students:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleBulkAssign = async () => {
+        if (!selectedDept) {
+            toast.error("Please select a department");
+            return;
+        }
+        if (selectedStudents.size === 0) {
+            toast.error("Please select at least one student");
+            return;
+        }
+
+        setAssigning(true);
+        try {
+            const response = await fetch('/api/students', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    student_ids: Array.from(selectedStudents),
+                    department_id: selectedDept
+                }),
+            });
+
+            if (!response.ok) throw new Error("Failed to assign department");
+
+            toast.success(`Assigned ${selectedStudents.size} students to department!`);
+            fetchUnassignedStudents(); // Refresh list
+        } catch (error) {
+            toast.error("Failed to assign department");
+        } finally {
+            setAssigning(false);
+        }
+    };
+
+    const toggleStudentSelection = (id: string) => {
+        setSelectedStudents(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const selectAllUnassigned = () => {
+        if (selectedStudents.size === students.length) {
+            setSelectedStudents(new Set());
+        } else {
+            setSelectedStudents(new Set(students.map(s => s.id)));
         }
     };
 
@@ -157,6 +245,15 @@ export default function StudentsPage() {
                         }`}
                 >
                     Semester Promotion
+                </button>
+                <button
+                    onClick={() => setActiveTab('departments')}
+                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'departments'
+                        ? 'border-neutral-900 dark:border-white text-neutral-900 dark:text-white'
+                        : 'border-transparent text-neutral-500 hover:text-neutral-700'
+                        }`}
+                >
+                    Department Assignment
                 </button>
             </div>
 
@@ -295,6 +392,87 @@ export default function StudentsPage() {
                                     );
                                 })}
                             </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {activeTab === 'departments' && (
+                <div className="space-y-6">
+                    <Card className="p-4">
+                        <div className="flex items-center gap-4 flex-wrap">
+                            <div className="flex-1 min-w-[200px]">
+                                <Label className="mb-2 block">Assign Department To Selected:</Label>
+                                <Select value={selectedDept} onValueChange={setSelectedDept}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select Department" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {departments.map((dept) => (
+                                            <SelectItem key={dept.id} value={dept.id}>
+                                                {dept.name} ({dept.code})
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="flex items-end">
+                                <Button
+                                    onClick={handleBulkAssign}
+                                    disabled={assigning || selectedDept === "" || selectedStudents.size === 0}
+                                    className="gap-2"
+                                >
+                                    {assigning ? <Loader2 className="animate-spin" size={18} /> : <Check size={18} />}
+                                    Assign to {selectedStudents.size} Students
+                                </Button>
+                            </div>
+                        </div>
+                    </Card>
+
+                    <div className="flex items-center justify-between">
+                        <h3 className="text-lg font-semibold">Unassigned Students ({students.length})</h3>
+                        <Button variant="outline" size="sm" onClick={selectAllUnassigned}>
+                            {selectedStudents.size === students.length ? "Deselect All" : "Select All"}
+                        </Button>
+                    </div>
+
+                    {loading ? (
+                        <div className="flex justify-center py-12">
+                            <Loader2 className="animate-spin text-neutral-400" size={32} />
+                        </div>
+                    ) : students.length === 0 ? (
+                        <Card className="p-12 text-center">
+                            <CheckCircle2 className="mx-auto text-green-500 mb-4" size={48} />
+                            <p className="text-neutral-500">All students have been assigned departments!</p>
+                        </Card>
+                    ) : (
+                        <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+                            {students.map((student) => {
+                                const isSelected = selectedStudents.has(student.id);
+                                return (
+                                    <Card
+                                        key={student.id}
+                                        onClick={() => toggleStudentSelection(student.id)}
+                                        className={`p-3 cursor-pointer transition-all ${isSelected
+                                            ? 'bg-blue-50 border-blue-300 dark:bg-blue-900/20 dark:border-blue-800'
+                                            : 'hover:border-neutral-400 dark:hover:border-neutral-600'
+                                            }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${isSelected
+                                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+                                                : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                                                }`}>
+                                                {isSelected ? <Check size={16} /> : student.roll_number.slice(-2)}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-medium text-neutral-900 dark:text-neutral-100 truncate">{student.name}</p>
+                                                <p className="text-xs text-neutral-500">{student.roll_number}</p>
+                                            </div>
+                                        </div>
+                                    </Card>
+                                );
+                            })}
                         </div>
                     )}
                 </div>

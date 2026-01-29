@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase-server';
 
 export async function DELETE(
     request: NextRequest,
@@ -7,7 +7,7 @@ export async function DELETE(
 ) {
     try {
         const { id } = await params;
-        const supabase = createServerClient();
+        const supabase = await createServerClient();
 
         const { error } = await supabase
             .from('timetable_slots')
@@ -31,7 +31,7 @@ export async function PATCH(
 ) {
     try {
         const { id } = await params;
-        const supabase = createServerClient();
+        const supabase = await createServerClient();
         const body = await request.json();
         const { day_of_week, start_time, end_time, room } = body;
 

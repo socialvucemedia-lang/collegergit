@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { UserCog, Plus, Search, Mail, GraduationCap, Users, ShieldCheck, User, Loader2 } from "lucide-react";
+import { UserCog, Plus, Search, Mail, GraduationCap, Users, ShieldCheck, User, Loader2, Edit } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import type { UserRole } from "@/types/database";
 
@@ -23,11 +24,21 @@ interface Student {
   user_id: string;
   roll_number: string;
   semester: number | null;
+  department_id: string | null;
+  section: string | null;
+  batch: string | null;
+}
+
+interface Department {
+  id: string;
+  name: string;
+  code: string;
 }
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [students, setStudents] = useState<Map<string, Student>>(new Map());
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -39,12 +50,14 @@ export default function UsersPage() {
     roll_number: "",
     employee_id: "",
     department_id: "",
-    semester: "",
+    section: "",
+    batch: "",
   });
 
   // Fetch users and students
   useEffect(() => {
     fetchUsers();
+    fetchDepartments();
   }, []);
 
   const fetchUsers = async () => {
@@ -93,9 +106,21 @@ export default function UsersPage() {
     }
   };
 
+  const fetchDepartments = async () => {
+    try {
+      const response = await fetch("/api/departments");
+      if (response.ok) {
+        const data = await response.json();
+        setDepartments(data.departments || []);
+      }
+    } catch (error) {
+      console.error("Error fetching departments:", error);
+    }
+  };
+
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     try {
       const payload: any = {
         email: formData.email,
@@ -104,16 +129,18 @@ export default function UsersPage() {
         role: formData.role,
       };
 
-      if (formData.role === "student" && formData.roll_number) {
+      if (formData.role === "student") {
+        if (!formData.roll_number) throw new Error("Roll Number is required for students");
         payload.roll_number = formData.roll_number;
+
+        if (formData.department_id) payload.department_id = formData.department_id;
+        if (formData.section) payload.section = formData.section.toUpperCase();
+        if (formData.batch) payload.batch = formData.batch.toUpperCase();
       }
 
       if (formData.role === "teacher" && formData.employee_id) {
         payload.employee_id = formData.employee_id;
-      }
-
-      if (formData.department_id) {
-        payload.department_id = formData.department_id;
+        if (formData.department_id) payload.department_id = formData.department_id;
       }
 
       const response = await fetch("/api/auth/register", {
@@ -137,38 +164,19 @@ export default function UsersPage() {
     }
   };
 
-  const handleAssignRollNumber = async (userId: string, rollNumber: string) => {
+  const handleUpdateStudent = async (studentId: string, updates: Partial<Student>) => {
     try {
-      // First check if student record exists
-      const studentRecord = Array.from(students.values()).find(s => s.user_id === userId);
-      
-      if (studentRecord) {
-        // Update existing student record
-        const response = await fetch(`/api/students/${studentRecord.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ roll_number: rollNumber }),
-        });
+      const response = await fetch(`/api/students/${studentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
 
-        if (!response.ok) throw new Error("Failed to update roll number");
-        toast.success("Roll number updated!");
-      } else {
-        // Create new student record
-        const { supabase } = await import("@/lib/supabase");
-        const { error } = await supabase
-          .from("students")
-          .insert({
-            user_id: userId,
-            roll_number: rollNumber,
-          });
-
-        if (error) throw error;
-        toast.success("Roll number assigned!");
-      }
-
+      if (!response.ok) throw new Error("Failed to update student");
+      toast.success("Student updated successfully!");
       fetchStudents();
     } catch (error: any) {
-      toast.error(error.message || "Failed to assign roll number");
+      toast.error(error.message || "Failed to update student");
     }
   };
 
@@ -181,7 +189,8 @@ export default function UsersPage() {
       roll_number: "",
       employee_id: "",
       department_id: "",
-      semester: "",
+      section: "",
+      batch: "",
     });
   };
 
@@ -277,46 +286,92 @@ export default function UsersPage() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="role">Role *</Label>
-                <select
-                  id="role"
-                  required
-                  value={formData.role}
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
-                  className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-md"
-                >
-                  <option value="student">Student</option>
-                  <option value="teacher">Teacher</option>
-                  <option value="advisor">Advisor</option>
-                  <option value="admin">Admin</option>
-                </select>
+              <div className="bg-neutral-50 dark:bg-neutral-900 p-4 rounded-lg space-y-4 border border-neutral-100 dark:border-neutral-800">
+                <div className="space-y-2">
+                  <Label htmlFor="role">Role *</Label>
+                  <Select
+                    value={formData.role}
+                    onValueChange={(val) => setFormData({ ...formData, role: val as UserRole })}
+                  >
+                    <SelectTrigger className="bg-white dark:bg-neutral-950">
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="student">Student</SelectItem>
+                      <SelectItem value="teacher">Teacher</SelectItem>
+                      <SelectItem value="advisor">Advisor</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {formData.role === "student" && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="roll_number">Roll Number *</Label>
+                      <Input
+                        id="roll_number"
+                        required
+                        value={formData.roll_number}
+                        onChange={(e) => setFormData({ ...formData, roll_number: e.target.value })}
+                        placeholder="201"
+                        className="bg-white dark:bg-neutral-950"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dept">Department</Label>
+                      <Select
+                        value={formData.department_id}
+                        onValueChange={(val) => setFormData({ ...formData, department_id: val })}
+                      >
+                        <SelectTrigger className="bg-white dark:bg-neutral-950">
+                          <SelectValue placeholder="Select Dept" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {departments.map(d => (
+                            <SelectItem key={d.id} value={d.id}>{d.name} ({d.code})</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="section">Division (Section)</Label>
+                      <Input
+                        id="section"
+                        value={formData.section}
+                        onChange={(e) => setFormData({ ...formData, section: e.target.value })}
+                        placeholder="A, B, C..."
+                        className="bg-white dark:bg-neutral-950"
+                        maxLength={1}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="batch">Batch</Label>
+                      <Input
+                        id="batch"
+                        value={formData.batch}
+                        onChange={(e) => setFormData({ ...formData, batch: e.target.value })}
+                        placeholder="B1, B2..."
+                        className="bg-white dark:bg-neutral-950"
+                        maxLength={5}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {formData.role === "teacher" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="employee_id">Employee ID</Label>
+                    <Input
+                      id="employee_id"
+                      value={formData.employee_id}
+                      onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
+                      placeholder="EMP001"
+                      className="bg-white dark:bg-neutral-950"
+                    />
+                  </div>
+                )}
               </div>
-
-              {formData.role === "student" && (
-                <div className="space-y-2">
-                  <Label htmlFor="roll_number">Roll Number *</Label>
-                  <Input
-                    id="roll_number"
-                    required
-                    value={formData.roll_number}
-                    onChange={(e) => setFormData({ ...formData, roll_number: e.target.value })}
-                    placeholder="201"
-                  />
-                </div>
-              )}
-
-              {formData.role === "teacher" && (
-                <div className="space-y-2">
-                  <Label htmlFor="employee_id">Employee ID</Label>
-                  <Input
-                    id="employee_id"
-                    value={formData.employee_id}
-                    onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
-                    placeholder="EMP001"
-                  />
-                </div>
-              )}
 
               <div className="flex gap-4 justify-end pt-4">
                 <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
@@ -376,19 +431,21 @@ export default function UsersPage() {
                           {user.email}
                         </div>
                         {student && (
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-3">
                             <span className="font-medium">Roll: {student.roll_number}</span>
+                            {student.section && <span className="bg-neutral-100 px-1.5 rounded text-xs">Div: {student.section}</span>}
+                            {student.batch && <span className="bg-neutral-100 px-1.5 rounded text-xs">Batch: {student.batch}</span>}
                           </div>
                         )}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {user.role === "student" && (
-                      <AssignRollNumberDialog
-                        userId={user.id}
-                        currentRollNumber={student?.roll_number}
-                        onAssign={handleAssignRollNumber}
+                    {user.role === "student" && student && (
+                      <EditStudentDialog
+                        student={student}
+                        departments={departments}
+                        onUpdate={(updates) => handleUpdateStudent(student.id, updates)}
                       />
                     )}
                   </div>
@@ -402,60 +459,114 @@ export default function UsersPage() {
   );
 }
 
-function AssignRollNumberDialog({
-  userId,
-  currentRollNumber,
-  onAssign,
+function EditStudentDialog({
+  student,
+  departments,
+  onUpdate,
 }: {
-  userId: string;
-  currentRollNumber?: string;
-  onAssign: (userId: string, rollNumber: string) => void;
+  student: Student;
+  departments: Department[];
+  onUpdate: (updates: Partial<Student>) => void;
 }) {
-  const [rollNumber, setRollNumber] = useState(currentRollNumber || "");
   const [isOpen, setIsOpen] = useState(false);
+  const [data, setData] = useState({
+    roll_number: student.roll_number,
+    department_id: student.department_id || "",
+    section: student.section || "",
+    batch: student.batch || "",
+  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!rollNumber.trim()) {
+    if (!data.roll_number.trim()) {
       toast.error("Roll number is required");
       return;
     }
-    onAssign(userId, rollNumber);
+
+    // Convert empty strings to null for DB consistency
+    const updates: any = {
+      roll_number: data.roll_number,
+      department_id: data.department_id || null,
+      section: data.section ? data.section.toUpperCase() : null,
+      batch: data.batch ? data.batch.toUpperCase() : null,
+    };
+
+    onUpdate(updates);
     setIsOpen(false);
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          {currentRollNumber ? "Update Roll" : "Assign Roll"}
+        <Button variant="outline" size="sm" className="gap-2">
+          <Edit size={14} />
+          Edit
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{currentRollNumber ? "Update Roll Number" : "Assign Roll Number"}</DialogTitle>
+          <DialogTitle>Edit Student Details</DialogTitle>
           <DialogDescription>
-            {currentRollNumber
-              ? `Current roll number: ${currentRollNumber}`
-              : "Assign a roll number to this student"}
+            Update roll number, department, division, and batch.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="roll">Roll Number</Label>
+            <Label htmlFor="edit_roll">Roll Number *</Label>
             <Input
-              id="roll"
+              id="edit_roll"
               required
-              value={rollNumber}
-              onChange={(e) => setRollNumber(e.target.value)}
-              placeholder="201"
+              value={data.roll_number}
+              onChange={(e) => setData({ ...data, roll_number: e.target.value })}
             />
           </div>
-          <div className="flex gap-4 justify-end">
+
+          <div className="space-y-2">
+            <Label htmlFor="edit_dept">Department</Label>
+            <Select
+              value={data.department_id || "none"}
+              onValueChange={(val) => setData({ ...data, department_id: val === "none" ? "" : val })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select Dept" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No Department</SelectItem>
+                {departments.map(d => (
+                  <SelectItem key={d.id} value={d.id}>{d.name} ({d.code})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit_section">Division</Label>
+              <Input
+                id="edit_section"
+                value={data.section}
+                onChange={(e) => setData({ ...data, section: e.target.value })}
+                placeholder="A"
+                maxLength={1}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit_batch">Batch</Label>
+              <Input
+                id="edit_batch"
+                value={data.batch}
+                onChange={(e) => setData({ ...data, batch: e.target.value })}
+                placeholder="B1"
+                maxLength={5}
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-4 justify-end pt-2">
             <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit">{currentRollNumber ? "Update" : "Assign"}</Button>
+            <Button type="submit">Save Changes</Button>
           </div>
         </form>
       </DialogContent>

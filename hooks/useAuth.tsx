@@ -41,22 +41,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    // Initial load
-    refreshUser().finally(() => setLoading(false));
+    let mounted = true;
 
-    // Listen for auth changes
+    const initAuth = async () => {
+      try {
+        const currentUser = await getCurrentUser();
+        if (mounted) setUser(currentUser);
+      } catch (error) {
+        console.error('Error refreshing user:', error);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    initAuth();
+
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
+
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        await refreshUser();
+        const currentUser = await getCurrentUser();
+        if (mounted) {
+          setUser(currentUser);
+          setLoading(false);
+        }
       } else if (event === 'SIGNED_OUT') {
-        setUser(null);
+        if (mounted) {
+          setUser(null);
+          setLoading(false);
+        }
       }
-      setLoading(false);
     });
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []);

@@ -8,10 +8,10 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 interface HealthData {
-    avgAttendance: number;
-    belowThreshold: number;
-    todayPresence: number;
-    totalStudents: number;
+    total_students: number;
+    avg_attendance: number | null;
+    below_threshold: number;
+    present_today: number;
 }
 
 export default function AdvisorDashboard() {
@@ -28,23 +28,9 @@ export default function AdvisorDashboard() {
             if (response.ok) {
                 const result = await response.json();
                 setData(result);
-            } else {
-                // Use fallback mock data
-                setData({
-                    avgAttendance: 84,
-                    belowThreshold: 8,
-                    todayPresence: 92,
-                    totalStudents: 62
-                });
             }
         } catch (error) {
             console.error("Error fetching health:", error);
-            setData({
-                avgAttendance: 84,
-                belowThreshold: 8,
-                todayPresence: 92,
-                totalStudents: 62
-            });
         } finally {
             setLoading(false);
         }
@@ -58,20 +44,29 @@ export default function AdvisorDashboard() {
         );
     }
 
-    if (!data) return null;
+    if (!data) {
+        return (
+            <div className="text-center py-20 text-neutral-500">
+                <Users className="mx-auto mb-4" size={48} />
+                <p>No class data available</p>
+            </div>
+        );
+    }
+
+    const avgAttendance = data.avg_attendance ?? 0;
 
     return (
         <div className="space-y-6 pb-20">
             <div className="space-y-1">
                 <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">Class Health</h1>
-                <p className="text-neutral-500">Computer Engineering • Sem 4</p>
+                <p className="text-neutral-500">{data.total_students} students enrolled</p>
             </div>
 
             {/* Overall Attendance - Hero Card */}
             <Card className={cn(
                 "p-6 border-2",
-                data.avgAttendance >= 75 ? "border-green-200 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800" :
-                    data.avgAttendance >= 65 ? "border-yellow-200 bg-yellow-50/50 dark:bg-yellow-900/10 dark:border-yellow-800" :
+                avgAttendance >= 75 ? "border-green-200 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800" :
+                    avgAttendance >= 65 ? "border-yellow-200 bg-yellow-50/50 dark:bg-yellow-900/10 dark:border-yellow-800" :
                         "border-red-200 bg-red-50/50 dark:bg-red-900/10 dark:border-red-800"
             )}>
                 <div className="flex items-center justify-between">
@@ -79,17 +74,17 @@ export default function AdvisorDashboard() {
                         <p className="text-sm text-neutral-500 mb-1">Average Attendance</p>
                         <h2 className={cn(
                             "text-4xl font-bold",
-                            data.avgAttendance >= 75 ? "text-green-600" :
-                                data.avgAttendance >= 65 ? "text-yellow-600" : "text-red-600"
+                            avgAttendance >= 75 ? "text-green-600" :
+                                avgAttendance >= 65 ? "text-yellow-600" : "text-red-600"
                         )}>
-                            {data.avgAttendance}%
+                            {data.avg_attendance !== null ? `${avgAttendance}%` : 'N/A'}
                         </h2>
                     </div>
                     <div className="text-right">
-                        <Badge variant={data.avgAttendance >= 75 ? "default" : "destructive"}>
-                            {data.avgAttendance >= 75 ? "Healthy" : "Needs Attention"}
+                        <Badge variant={avgAttendance >= 75 ? "default" : "destructive"}>
+                            {avgAttendance >= 75 ? "Healthy" : "Needs Attention"}
                         </Badge>
-                        <p className="text-xs text-neutral-400 mt-2">{data.totalStudents} students</p>
+                        <p className="text-xs text-neutral-400 mt-2">{data.total_students} students</p>
                     </div>
                 </div>
             </Card>
@@ -103,7 +98,7 @@ export default function AdvisorDashboard() {
                                 <AlertTriangle size={20} className="text-red-600" />
                             </div>
                             <div>
-                                <p className="text-2xl font-bold text-red-600">{data.belowThreshold}</p>
+                                <p className="text-2xl font-bold text-red-600">{data.below_threshold}</p>
                                 <p className="text-xs text-neutral-500">Below 75%</p>
                             </div>
                         </div>
@@ -119,8 +114,8 @@ export default function AdvisorDashboard() {
                             <TrendingUp size={20} className="text-green-600" />
                         </div>
                         <div>
-                            <p className="text-2xl font-bold text-green-600">{data.todayPresence}%</p>
-                            <p className="text-xs text-neutral-500">Today</p>
+                            <p className="text-2xl font-bold text-green-600">{data.present_today}</p>
+                            <p className="text-xs text-neutral-500">Present Today</p>
                         </div>
                     </div>
                 </Card>
@@ -138,7 +133,7 @@ export default function AdvisorDashboard() {
                             </div>
                             <div>
                                 <p className="font-medium text-neutral-900 dark:text-neutral-100">View All Students</p>
-                                <p className="text-xs text-neutral-500">{data.totalStudents} enrolled</p>
+                                <p className="text-xs text-neutral-500">{data.total_students} enrolled</p>
                             </div>
                         </div>
                         <ChevronRight size={18} className="text-neutral-400" />
