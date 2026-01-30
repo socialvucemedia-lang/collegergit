@@ -31,16 +31,23 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Teacher profile not found' }, { status: 403 });
         }
 
-        // Fetch sessions
+        // Fetch sessions with section/batch info
         const { data: sessions, error: sessionsError } = await supabase
             .from('attendance_sessions')
             .select(`
-        *,
-        subjects (
-          code,
-          name
-        )
-      `)
+                id,
+                session_date,
+                start_time,
+                end_time,
+                room,
+                status,
+                section,
+                batch,
+                subjects (
+                    code,
+                    name
+                )
+            `)
             .eq('teacher_id', teacher.id)
             .order('session_date', { ascending: false })
             .order('created_at', { ascending: false });

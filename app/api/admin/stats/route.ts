@@ -1,20 +1,28 @@
-import { createServerClient } from '@/lib/supabase-server';
+import { getAuthorizedUser } from '@/lib/api-auth';
 import { NextResponse } from 'next/server';
 
 export async function GET() {
     try {
-        const supabase = await createServerClient();
+        const auth = await getAuthorizedUser();
+        if (auth.error) return auth.error;
 
+        if (!auth.isAdmin) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
+        const { supabaseAdmin } = auth;
+
+        // Use service role client to get accurate counts across all tables
         const [
             { count: usersCount },
             { count: deptsCount },
             { count: subjectsCount },
             { count: allocationsCount }
         ] = await Promise.all([
-            supabase.from('users').select('*', { count: 'exact', head: true }),
-            supabase.from('departments').select('*', { count: 'exact', head: true }),
-            supabase.from('subjects').select('*', { count: 'exact', head: true }),
-            supabase.from('teacher_subject_allocations').select('*', { count: 'exact', head: true })
+            supabaseAdmin.from('users').select('*', { count: 'exact', head: true }),
+            supabaseAdmin.from('departments').select('*', { count: 'exact', head: true }),
+            supabaseAdmin.from('subjects').select('*', { count: 'exact', head: true }),
+            supabaseAdmin.from('teacher_subject_allocations').select('*', { count: 'exact', head: true })
         ]);
 
         return NextResponse.json({
@@ -26,6 +34,7 @@ export async function GET() {
             }
         });
     } catch (error) {
+        console.error('Admin stats error:', error);
         return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
 }

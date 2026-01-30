@@ -1,84 +1,92 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { getAuthorizedUser } from '@/lib/api-auth';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createServerClient();
-    const searchParams = request.nextUrl.searchParams;
-    const teacherId = searchParams.get('teacher_id');
-    const subjectId = searchParams.get('subject_id');
-    const date = searchParams.get('date');
-    const status = searchParams.get('status');
+    const auth = await getAuthorizedUser();
+    if (auth.error) return auth.error;
 
-    let query = supabase
+    const { isAdmin, isAdvisor, isTeacher, supabaseAdmin, supabase } = auth;
+    const isStaff = isAdmin || isAdvisor || isTeacher;
+    const client = isStaff ? supabaseAdmin : supabase;
+
+    const searchParams = request.nextUrl.searchParams;
+    const department_id = searchParams.get('department_id');
+    const teacher_id = searchParams.get('teacher_id');
+    const semester = searchParams.get('semester');
+    const section = searchParams.get('section');
+    const date = searchParams.get('date');
+
+    let query = client
       .from('attendance_sessions')
       .select(`
         *,
-        subject:subjects(*),
-        teacher:teachers(*)
+        subject:subjects (id, code, name),
+        teacher:teachers (
+          id,
+          employee_id,
+          user:users (full_name)
+        )
       `)
-      .order('session_date', { ascending: false })
+      .order('date', { ascending: false })
       .order('start_time', { ascending: false });
 
-    if (teacherId) {
-      query = query.eq('teacher_id', teacherId);
-    }
-
-    if (subjectId) {
-      query = query.eq('subject_id', subjectId);
-    }
-
-    if (date) {
-      query = query.eq('session_date', date);
-    }
-
-    if (status) {
-      query = query.eq('status', status);
-    }
+    if (department_id) query = query.eq('subjects.department_id', department_id);
+    if (teacher_id) query = query.eq('teacher_id', teacher_id);
+    if (semester) query = query.eq('semester', parseInt(semester));
+    if (section) query = query.eq('section', section);
+    if (date) query = query.eq('date', date);
 
     const { data, error } = await query;
 
     if (error) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      );
+      console.error('Attendance sessions fetch error:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({ sessions: data || [] });
   } catch (error) {
-    console.error('Sessions fetch error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Attendance sessions API error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { subject_id, teacher_id, session_date, start_time, end_time, room, status } = body;
+    const auth = await getAuthorizedUser();
+    if (auth.error) return auth.error;
 
-    if (!subject_id || !session_date) {
+    // Only Admin or Teacher can create sessions
+    if (!auth.isAdmin && !auth.isTeacher) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const { supabaseAdmin } = auth;
+    const body = await request.json();
+    const { subject_id, teacher_id, date, start_time, end_time, room, status, semester, section, batch } = body;
+
+    if (!subject_id || !date) {
       return NextResponse.json(
-        { error: 'subject_id and session_date are required' },
+        { error: 'subject_id and date are required' },
         { status: 400 }
       );
     }
 
-    const supabase = await createServerClient();
-
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('attendance_sessions')
       .insert({
         subject_id,
-        teacher_id: teacher_id || null,
-        session_date,
+        teacher_id: teacher_id || auth.user.id, // Fallback to auth user if not provided (for teachers)
+        date,
         start_time: start_time || null,
         end_time: end_time || null,
         room: room || null,
         status: status || 'scheduled',
+        semester,
+        section,
+        batch
       })
       .select()
       .single();

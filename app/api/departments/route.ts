@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { getAuthorizedUser } from '@/lib/api-auth';
 
 export async function GET() {
   try {
-    const supabase = await createServerClient();
+    const auth = await getAuthorizedUser();
+    if (auth.error) return auth.error;
+
+    // Standard client is fine for departments as they are usually public or standard RLS
+    // but we use the helper to ensure session is valid
+    const { supabase } = auth;
 
     const { data, error } = await supabase
       .from('departments')
       .select('*')
-      .order('code', { ascending: true });
+      .order('name', { ascending: true });
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -23,20 +28,21 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createServerClient();
-    const body = await request.json();
-    const { code, name, description } = body;
+    const auth = await getAuthorizedUser();
+    if (auth.error) return auth.error;
 
-    if (!code || !name) {
-      return NextResponse.json(
-        { error: 'Department code and name are required' },
-        { status: 400 }
-      );
+    // Only admin can create departments
+    if (!auth.isAdmin) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { data, error } = await supabase
+    const { supabaseAdmin } = auth;
+    const body = await request.json();
+    const { name, code } = body;
+
+    const { data, error } = await supabaseAdmin
       .from('departments')
-      .insert({ code, name, description: description || null })
+      .insert({ name, code })
       .select()
       .single();
 

@@ -1,20 +1,22 @@
 import { NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { getAuthorizedUser } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
     try {
-        const supabase = await createServerClient();
+        const auth = await getAuthorizedUser();
+        if (auth.error) return auth.error;
 
-        // Get current user
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
-        if (userError || !user) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        const { user, profile, isAdmin, isAdvisor, supabaseAdmin } = auth;
+
+        // Only Admin or Advisor/Teacher with appropriate profile should access this
+        if (!isAdmin && !isAdvisor && profile.role !== 'teacher') {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
-        // Get advisor record
-        const { data: advisor } = await supabase
+        // Get advisor record - Use supabaseAdmin to bypass RLS
+        const { data: advisor } = await supabaseAdmin
             .from('class_advisors')
             .select('id, department_id, section, semester')
             .eq('user_id', user.id)
@@ -26,7 +28,7 @@ export async function GET() {
         let semester = advisor?.semester;
 
         if (!advisor) {
-            const { data: teacher } = await supabase
+            const { data: teacher } = await supabaseAdmin
                 .from('teachers')
                 .select('id, department_id')
                 .eq('user_id', user.id)
@@ -37,8 +39,8 @@ export async function GET() {
             }
         }
 
-        // Get students
-        let studentQuery = supabase
+        // Get students - Use supabaseAdmin to bypass RLS forauthorized dashboard view
+        let studentQuery = supabaseAdmin
             .from('students')
             .select(`
                 id,
@@ -74,14 +76,14 @@ export async function GET() {
         }
 
         const formattedStudents = (students || []).map(s => {
-            const user = Array.isArray(s.users) ? s.users[0] : s.users;
+            const studentUser = Array.isArray(s.users) ? s.users[0] : s.users;
             const dept = Array.isArray(s.departments) ? s.departments[0] : s.departments;
 
             return {
                 id: s.id,
                 rollNumber: s.roll_number,
-                name: user?.full_name || 'Unknown',
-                email: user?.email || '',
+                name: studentUser?.full_name || 'Unknown',
+                email: studentUser?.email || '',
                 section: s.section,
                 batch: s.batch,
                 semester: s.semester,

@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { getAuthorizedUser } from '@/lib/api-auth';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createServerClient();
+    const auth = await getAuthorizedUser();
+    if (auth.error) return auth.error;
+
+    const { isAdmin, isAdvisor, supabase, supabaseAdmin } = auth;
+    const isAuthorized = isAdmin || isAdvisor;
+    const client = isAuthorized ? supabaseAdmin : supabase;
+
     const searchParams = request.nextUrl.searchParams;
     const semester = searchParams.get('semester');
     const department_id = searchParams.get('department_id');
     const unassigned = searchParams.get('unassigned');
 
-    let query = supabase
+    let query = client
       .from('students')
       .select(`
         id,
@@ -65,7 +71,14 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = await createServerClient();
+    const auth = await getAuthorizedUser();
+    if (auth.error) return auth.error;
+
+    const { isAdmin, supabaseAdmin } = auth;
+    if (!isAdmin) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const body = await request.json();
     const { student_ids, department_id } = body;
 
@@ -77,7 +90,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Department ID is required' }, { status: 400 });
     }
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('students')
       .update({ department_id })
       .in('id', student_ids);

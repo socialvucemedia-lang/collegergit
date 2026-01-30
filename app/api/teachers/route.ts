@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { getAuthorizedUser } from '@/lib/api-auth';
 
 export async function GET(request: NextRequest) {
     try {
-        const supabase = await createServerClient();
+        const auth = await getAuthorizedUser();
+        if (auth.error) return auth.error;
+
+        const { isAdmin, isAdvisor, supabase, supabaseAdmin } = auth;
+        const isAuthorized = isAdmin || isAdvisor;
+        const client = isAuthorized ? supabaseAdmin : supabase;
 
         // Fetch all teachers with their user details
-        const { data, error } = await supabase
+        const { data, error } = await client
             .from('teachers')
             .select(`
         id,

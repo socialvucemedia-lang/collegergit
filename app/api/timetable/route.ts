@@ -1,20 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { getAuthorizedUser } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
     try {
-        const supabase = await createServerClient();
+        const auth = await getAuthorizedUser();
+        if (auth.error) return auth.error;
+
+        const { isAdmin, isAdvisor, isTeacher, supabaseAdmin, supabase } = auth;
+
+        // Use admin client for Admins, Advisors, and Teachers to see the full timetable
+        // Standard client for students (respects RLS)
+        const isStaff = isAdmin || isAdvisor || isTeacher;
+        const client = isStaff ? supabaseAdmin : supabase;
+
         const searchParams = request.nextUrl.searchParams;
         const department_id = searchParams.get('department_id');
         const semester = searchParams.get('semester');
         const section = searchParams.get('section');
         const batch = searchParams.get('batch');
 
-        // Build the select query dynamically based on whether we need to filter by department
+        // Optimized select query with specific fields
         let selectQuery = `
-        *,
+        id, subject_id, teacher_id, day_of_week, start_time, end_time, room, section, semester, batch,
         subjects${department_id ? '!inner' : ''} (
           id,
           code,
@@ -30,7 +39,7 @@ export async function GET(request: NextRequest) {
         )
       `;
 
-        let query = supabase
+        let query = client
             .from('timetable_slots')
             .select(selectQuery)
             .order('day_of_week', { ascending: true })
@@ -68,9 +77,17 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
     try {
-        const supabase = await createServerClient();
+        const auth = await getAuthorizedUser();
+        if (auth.error) return auth.error;
+
+        // Only Admin or Advisor can create timetable slots
+        if (!auth.isAdmin && !auth.isAdvisor) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
+        const { supabaseAdmin } = auth;
         const body = await request.json();
-        const { subject_id, teacher_id, day_of_week, start_time, end_time, room, section, semester, department_id, batch } = body;
+        const { subject_id, teacher_id, day_of_week, start_time, end_time, room, section, semester, batch } = body;
 
         if (!subject_id || day_of_week === undefined || day_of_week === null || !start_time || !end_time) {
             return NextResponse.json(
@@ -79,74 +96,42 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Check for conflicts
+        // Optimized: Check for all conflicts in a single query
+        const { data: existingSlots, error: conflictError } = await supabaseAdmin
+            .from('timetable_slots')
+            .select(`
+                id, 
+                teacher_id, 
+                room, 
+                section, 
+                semester,
+                subjects (code, name),
+                teachers (users (full_name))
+            `)
+            .eq('day_of_week', day_of_week)
+            .lte('start_time', end_time)
+            .gte('end_time', start_time)
+            .or(`teacher_id.eq.${teacher_id || 'null'},room.eq.${room || 'null'},and(section.eq.${section || 'null'},semester.eq.${semester || 'null'})`);
+
+        if (conflictError) {
+            console.error('Conflict check error:', conflictError);
+            return NextResponse.json({ error: 'Conflict check failed' }, { status: 500 });
+        }
+
         const conflicts: string[] = [];
-
-        // 1. Check for teacher conflict (same teacher at same time on same day)
-        if (teacher_id) {
-            const { data: teacherConflicts } = await supabase
-                .from('timetable_slots')
-                .select(`
-                    id,
-                    section,
-                    subjects (code, name),
-                    teachers (
-                        users (full_name)
-                    )
-                `)
-                .eq('teacher_id', teacher_id)
-                .eq('day_of_week', day_of_week)
-                .lte('start_time', end_time)
-                .gte('end_time', start_time);
-
-            if (teacherConflicts && teacherConflicts.length > 0) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const conflict = teacherConflicts[0] as any;
-                const teacherName = conflict.teachers?.users?.full_name || 'This teacher';
-                conflicts.push(`${teacherName} is already teaching ${conflict.subjects?.code || 'another class'} in Section ${conflict.section} at this time`);
+        if (existingSlots && existingSlots.length > 0) {
+            for (const slot of existingSlots as any[]) {
+                if (teacher_id && slot.teacher_id === teacher_id) {
+                    const name = slot.teachers?.users?.full_name || 'This teacher';
+                    conflicts.push(`${name} is already teaching ${slot.subjects?.code} in Section ${slot.section} at this time`);
+                } else if (room && slot.room === room) {
+                    conflicts.push(`Room ${room} is already booked for ${slot.subjects?.code} (Section ${slot.section}) at this time`);
+                } else if (section && slot.section === section && slot.semester == semester) {
+                    conflicts.push(`This time slot already has ${slot.subjects?.code} scheduled for Section ${section}`);
+                }
             }
         }
 
-        // 2. Check for room conflict (same room at same time on same day)
-        if (room && room.trim()) {
-            const { data: roomConflicts } = await supabase
-                .from('timetable_slots')
-                .select(`
-                    id,
-                    section,
-                    subjects (code, name)
-                `)
-                .eq('room', room)
-                .eq('day_of_week', day_of_week)
-                .lte('start_time', end_time)
-                .gte('end_time', start_time);
-
-            if (roomConflicts && roomConflicts.length > 0) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const conflict = roomConflicts[0] as any;
-                conflicts.push(`Room ${room} is already booked for ${conflict.subjects?.code || 'another class'} (Section ${conflict.section}) at this time`);
-            }
-        }
-
-        // 3. Check for section slot conflict (same section, same time)
-        if (section) {
-            const { data: slotConflicts } = await supabase
-                .from('timetable_slots')
-                .select(`id, subjects (code)`)
-                .eq('section', section)
-                .eq('semester', semester)
-                .eq('day_of_week', day_of_week)
-                .lte('start_time', end_time)
-                .gte('end_time', start_time);
-
-            if (slotConflicts && slotConflicts.length > 0) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const conflict = slotConflicts[0] as any;
-                conflicts.push(`This time slot already has ${conflict.subjects?.code || 'a class'} scheduled for Section ${section}`);
-            }
-        }
-
-        // Return error if any conflicts found
         if (conflicts.length > 0) {
             return NextResponse.json(
                 { error: 'Scheduling Conflict', conflicts },
@@ -154,7 +139,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await supabaseAdmin
             .from('timetable_slots')
             .insert({
                 subject_id,
@@ -165,24 +150,13 @@ export async function POST(request: NextRequest) {
                 room: room || null,
                 section: section || null,
                 semester: semester || null,
-                // department_id is derived from subject, not stored in timetable_slots
                 batch: batch || null,
             })
             .select(`
-        *,
-        subjects (
-          id,
-          code,
-          name
-        ),
-        teachers (
-          id,
-          employee_id,
-          users (
-            full_name
-          )
-        )
-      `)
+                id, subject_id, teacher_id, day_of_week, start_time, end_time, room, section, semester, batch,
+                subjects (id, code, name),
+                teachers (id, employee_id, users (full_name))
+            `)
             .single();
 
         if (error) {

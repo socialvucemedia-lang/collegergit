@@ -171,17 +171,62 @@ export async function GET(
             return NextResponse.json({ error: recordsError.message }, { status: 500 });
         }
 
-        // 5. Merge data
+        // 5. Calculate Attendance Percentage for this Subject
+        // A. Get total completed sessions for this subject
+        const { count: totalLectures } = await supabase
+            .from('attendance_sessions')
+            .select('id', { count: 'exact', head: true })
+            .eq('subject_id', subject.id)
+            .eq('status', 'completed');
+
+        // B. Get present count for each student in this subject
+        // We can't easily do a group by with the JS client without rpc, so we'll fetch all relevant records
+        // Optimization: Filter by students we actually found
+        const studentIds = students?.map((s: any) => s.id) || [];
+
+        const { data: presenceData } = await supabase
+            .from('attendance_records')
+            .select(`
+                student_id,
+                attendance_sessions!inner (
+                    subject_id
+                )
+            `)
+            .eq('status', 'present')
+            .eq('attendance_sessions.subject_id', subject.id)
+            .in('student_id', studentIds);
+
+        // Count presents per student
+        const presentMap = new Map<string, number>();
+        presenceData?.forEach((record: any) => {
+            const sid = record.student_id;
+            presentMap.set(sid, (presentMap.get(sid) || 0) + 1);
+        });
+
+        // 6. Merge data
         const studentList = students?.map((student: any) => {
             const record = records?.find((r: any) => r.student_id === student.id);
             const userInfo = Array.isArray(student.users) ? student.users[0] : student.users;
+
+            const presents = presentMap.get(student.id) || 0;
+            const total = totalLectures || 0;
+            // Avoid division by zero, default to 100% if no classes yet (or 0%? usually 100 or 0. Let's say 0 to be safe/neutral)
+            // Actually if total is 0, percentage is N/A. But let's verify.
+            // If this is the FIRST session, total might be 0 (since this one isn't completed yet).
+            // Let's assume this session counts if it were completed? No, usually historical.
+            // Let's use historical percentage.
+            const percentage = total > 0 ? Math.round((presents / total) * 100) : 0;
+
             return {
                 student_id: student.id,
                 roll_number: student.roll_number,
                 name: userInfo?.full_name || 'Unknown',
                 email: userInfo?.email,
                 status: record?.status || null, // null means not marked yet
-                record_id: record?.id // Crucial for edit capability
+                record_id: record?.id, // Crucial for edit capability
+                attendance_percentage: percentage,
+                total_lectures: total,
+                present_lectures: presents
             };
         });
 

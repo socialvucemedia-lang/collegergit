@@ -16,6 +16,8 @@ interface Session {
     end_time: string;
     room: string;
     status: string;
+    section?: string;
+    batch?: string;
     subjects: { code: string; name: string };
     attendance_count?: { present: number; absent: number };
 }
@@ -212,9 +214,18 @@ export default function SessionHistoryPage() {
                                         }`} />
                                     <div>
                                         <p className="font-medium">{session.subjects?.code} - {session.subjects?.name}</p>
-                                        <p className="text-sm text-neutral-500">
-                                            {new Date(session.session_date).toLocaleDateString()} • {session.start_time?.slice(0, 5)}
-                                        </p>
+                                        <div className="flex items-center gap-2 text-sm text-neutral-500">
+                                            <span>{new Date(session.session_date).toLocaleDateString()}</span>
+                                            <span>•</span>
+                                            <span>{session.start_time?.slice(0, 5)}</span>
+                                            {session.section && (
+                                                <>
+                                                    <span>•</span>
+                                                    <span className="font-medium text-neutral-700 dark:text-neutral-300">Div {session.section}</span>
+                                                    {session.batch && <span className="text-neutral-400">({session.batch})</span>}
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">

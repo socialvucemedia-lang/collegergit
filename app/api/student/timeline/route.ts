@@ -43,9 +43,28 @@ export async function GET() {
         const dayOfWeek = today.getDay();
 
         // Fetch today's timetable slots for the student's section and semester
-        let query = supabase
-            .from('timetable_slots')
-            .select(`
+        // Note: We filter by department_id through subjects relation since timetable_slots doesn't have department_id
+        let selectQuery = student.department_id
+            ? `
+                id,
+                start_time,
+                end_time,
+                room,
+                batch,
+                subjects!inner (
+                    id,
+                    code,
+                    name,
+                    department_id
+                ),
+                teachers (
+                    id,
+                    users (
+                        full_name
+                    )
+                )
+            `
+            : `
                 id,
                 start_time,
                 end_time,
@@ -62,7 +81,11 @@ export async function GET() {
                         full_name
                     )
                 )
-            `)
+            `;
+
+        let query = supabase
+            .from('timetable_slots')
+            .select(selectQuery)
             .eq('day_of_week', dayOfWeek)
             .eq('semester', student.semester)
             .order('start_time', { ascending: true });
@@ -72,7 +95,7 @@ export async function GET() {
         }
 
         if (student.department_id) {
-            query = query.eq('department_id', student.department_id);
+            query = query.eq('subjects.department_id', student.department_id);
         }
 
         const { data: slots, error: slotError } = await query;
@@ -82,7 +105,8 @@ export async function GET() {
         }
 
         // Filter by batch if applicable
-        let filteredSlots = slots || [];
+        // Cast to any[] to handle dynamic select query typing
+        let filteredSlots: any[] = slots || [];
         if (student.batch) {
             filteredSlots = filteredSlots.filter(slot => !slot.batch || slot.batch === student.batch);
         }
@@ -96,48 +120,73 @@ export async function GET() {
             const subject = slot.subjects as any;
             const teacher = slot.teachers as any;
 
-            // Check if there's an attendance session for this slot today
-            const { data: session } = await supabase
-                .from('attendance_sessions')
-                .select('id')
-                .eq('subject_id', subject?.id)
-                .eq('date', today.toISOString().split('T')[0])
-                .single();
+            if (!subject || !subject.id) {
+                console.warn(`Slot ${slot.id} has no subject linked.`);
+                timeline.push({
+                    id: slot.id,
+                    start_time: slot.start_time,
+                    end_time: slot.end_time,
+                    room: slot.room,
+                    subject_code: 'ERR',
+                    subject_name: 'Unknown Subject',
+                    teacher_name: teacher?.users?.full_name || null,
+                    status: 'upcoming',
+                    attendance_status: 'pending'
+                });
+                continue;
+            }
 
-            let attendanceStatus: 'present' | 'absent' | 'late' | 'pending' = 'pending';
-
-            if (session) {
-                const { data: attendance } = await supabase
-                    .from('attendance')
-                    .select('status')
-                    .eq('session_id', session.id)
-                    .eq('student_id', student.id)
+            try {
+                // Check if there's an attendance session for this slot today
+                const { data: session, error: sessionError } = await supabase
+                    .from('attendance_sessions')
+                    .select('id')
+                    .eq('subject_id', subject.id)
+                    .eq('session_date', today.toISOString().split('T')[0])
                     .single();
 
-                if (attendance) {
-                    attendanceStatus = attendance.status as any;
+                // Allow "Row not found" error (code PGRST116)
+                if (sessionError && sessionError.code !== 'PGRST116') {
+                    console.error('Session lookup error:', sessionError);
                 }
-            }
 
-            // Determine if slot is current, upcoming, or past
-            let status: 'current' | 'upcoming' | 'completed' = 'upcoming';
-            if (currentTime >= slot.start_time && currentTime < slot.end_time) {
-                status = 'current';
-            } else if (currentTime >= slot.end_time) {
-                status = 'completed';
-            }
+                let attendanceStatus: 'present' | 'absent' | 'late' | 'pending' = 'pending';
 
-            timeline.push({
-                id: slot.id,
-                start_time: slot.start_time,
-                end_time: slot.end_time,
-                room: slot.room,
-                subject_code: subject?.code || 'N/A',
-                subject_name: subject?.name || 'Unknown Subject',
-                teacher_name: teacher?.users?.full_name || null,
-                status,
-                attendance_status: attendanceStatus
-            });
+                if (session) {
+                    const { data: attendance } = await supabase
+                        .from('attendance_records')
+                        .select('status')
+                        .eq('session_id', session.id)
+                        .eq('student_id', student.id)
+                        .single();
+
+                    if (attendance) {
+                        attendanceStatus = attendance.status as any;
+                    }
+                }
+
+                // Determine if slot is current, upcoming, or past
+                let status: 'current' | 'upcoming' | 'completed' = 'upcoming';
+                if (currentTime >= slot.start_time && currentTime < slot.end_time) {
+                    status = 'current';
+                } else if (currentTime >= slot.end_time) {
+                    status = 'completed';
+                }
+
+                timeline.push({
+                    id: slot.id,
+                    start_time: slot.start_time,
+                    end_time: slot.end_time,
+                    room: slot.room,
+                    subject_code: subject?.code || 'N/A',
+                    subject_name: subject?.name || 'Unknown Subject',
+                    teacher_name: teacher?.users?.full_name || null,
+                    status,
+                    attendance_status: attendanceStatus
+                });
+            } catch (err) {
+                console.error(`Error processing slot ${slot.id}:`, err);
+            }
         }
 
         return NextResponse.json({

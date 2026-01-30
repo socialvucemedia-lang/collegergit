@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { getAuthorizedUser } from '@/lib/api-auth';
 
 export async function GET(request: NextRequest) {
     try {
-        const supabase = await createServerClient();
+        const auth = await getAuthorizedUser();
+        if (auth.error) return auth.error;
+
+        const { isAdmin, isAdvisor, isTeacher, supabaseAdmin, supabase } = auth;
+        const isStaff = isAdmin || isAdvisor || isTeacher;
+        const client = isStaff ? supabaseAdmin : supabase;
+
         const searchParams = request.nextUrl.searchParams;
         const academic_year = searchParams.get('academic_year');
         const teacher_id = searchParams.get('teacher_id');
 
-        let query = supabase
+        let query = client
             .from('teacher_subject_allocations')
             .select(`
         *,
@@ -56,7 +62,14 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
     try {
-        const supabase = await createServerClient();
+        const auth = await getAuthorizedUser();
+        if (auth.error) return auth.error;
+
+        if (!auth.isAdmin) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
+        const { supabaseAdmin } = auth;
         const body = await request.json();
         const { teacher_id, subject_id, section, batch, academic_year } = body;
 
@@ -67,8 +80,8 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Check for duplicate allocation
-        const { data: existing } = await supabase
+        // Check for duplicate allocation - Use admin client
+        const { data: existing } = await supabaseAdmin
             .from('teacher_subject_allocations')
             .select('id')
             .eq('teacher_id', teacher_id)
@@ -85,7 +98,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await supabaseAdmin
             .from('teacher_subject_allocations')
             .insert({
                 teacher_id,

@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
     const supabase = supabaseAdmin;
 
     // Create user in Supabase Auth using Admin API
+    // The trigger 'on_auth_user_created' will automatically create the public.users profile
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password,
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (authError) {
+      console.error("Supabase createUser error:", authError);
       return NextResponse.json(
         { error: authError.message },
         { status: 400 }
@@ -37,24 +39,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create user profile in users table
-    const { error: userError } = await supabase
-      .from('users')
-      .insert({
-        id: authData.user.id,
-        email,
-        full_name,
-        role: role as UserRole,
-      });
+    // Profile is created by trigger, so we can proceed to create specific role entries
+    // We add a small delay or check to ensure profile exists if we had strict FK constraints,
+    // but standard Postgres triggers are synchronous within the transaction so it should be there.
 
-    if (userError) {
-      // Clean up auth user if profile creation fails
-      await supabase.auth.admin.deleteUser(authData.user.id);
-      return NextResponse.json(
-        { error: 'Failed to create user profile' },
-        { status: 500 }
-      );
-    }
 
     // Create role-specific records
     if (role === 'student' && roll_number) {
