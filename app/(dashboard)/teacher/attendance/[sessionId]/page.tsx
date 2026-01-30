@@ -55,6 +55,7 @@ export default function MarkAttendancePage() {
     const [students, setStudents] = useState<StudentRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     // View Mode & Persistence
     const [viewMode, setViewMode] = useState<ViewMode>(null);
@@ -103,20 +104,26 @@ export default function MarkAttendancePage() {
 
     const fetchData = async () => {
         try {
+            setLoading(true);
+            setError(null);
             const { data: { session: currentSession } } = await supabase.auth.getSession();
             const response = await fetch(`/api/teacher/sessions/${sessionId}/attendance`, {
                 headers: {
                     Authorization: `Bearer ${currentSession?.access_token}`,
                 },
             });
-            if (!response.ok) throw new Error("Failed to load data");
 
             const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Failed to load data");
+            }
+
             setSession(data.session);
             setStudents(data.students || []);
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
-            toast.error("Failed to load attendance session");
+            setError(error.message);
+            toast.error(error.message || "Failed to load attendance session");
         } finally {
             setLoading(false);
         }
@@ -244,6 +251,24 @@ export default function MarkAttendancePage() {
 
     if (loading) {
         return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin text-neutral-400" size={32} /></div>;
+    }
+
+    if (error) {
+        return (
+            <div className="flex h-screen flex-col items-center justify-center space-y-4 text-center p-6 bg-neutral-50 dark:bg-neutral-950">
+                <div className="p-6 bg-white dark:bg-neutral-900 rounded-2xl shadow-xl border border-red-100 dark:border-red-900/30 max-w-md">
+                    <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600">
+                        <X size={32} />
+                    </div>
+                    <h2 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Error Loading Session</h2>
+                    <p className="text-neutral-500 text-sm mb-6">{error}</p>
+                    <div className="flex gap-3">
+                        <Button onClick={() => router.back()} variant="outline" className="flex-1">Go Back</Button>
+                        <Button onClick={fetchData} className="flex-1">Retry</Button>
+                    </div>
+                </div>
+            </div>
+        );
     }
 
     if (!session) {

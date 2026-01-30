@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
 
                 // Get student's attendance for these sessions
                 const { data: attendanceRecords } = await supabase
-                    .from('attendance')
+                    .from('attendance_records')
                     .select('status')
                     .eq('student_id', student.id)
                     .in('session_id', sessionIds);

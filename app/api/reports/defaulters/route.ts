@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
         for (const student of students) {
             // Get attendance records for this student
             const { data: attendanceRecords, error: attendanceError } = await supabase
-                .from('attendance')
+                .from('attendance_records')
                 .select('status')
                 .eq('student_id', student.id);
 
