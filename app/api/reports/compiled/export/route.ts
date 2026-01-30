@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
                 const sessionIds = sessions.map(s => s.id);
 
                 const { data: attendanceRecords } = await supabase
-                    .from('attendance')
+                    .from('attendance_records')
                     .select('status')
                     .eq('student_id', student.id)
                     .in('session_id', sessionIds);

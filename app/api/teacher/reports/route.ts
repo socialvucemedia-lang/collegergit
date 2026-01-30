@@ -1,16 +1,17 @@
 import { NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { getAuthorizedUser } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
     try {
-        const supabase = await createServerClient();
+        const auth = await getAuthorizedUser();
+        if (auth.error) return auth.error;
 
-        // Get current user
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
-        if (userError || !user) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        const { supabase, profile, user } = auth;
+
+        if (profile.role !== 'teacher' && profile.role !== 'admin') {
+            return NextResponse.json({ error: 'Forbidden: Teacher access required' }, { status: 403 });
         }
 
         // Get teacher record
@@ -21,7 +22,7 @@ export async function GET() {
             .single();
 
         if (teacherError || !teacher) {
-            return NextResponse.json({ error: 'Teacher not found' }, { status: 404 });
+            return NextResponse.json({ error: 'Teacher record not found. Please contact an administrator.' }, { status: 404 });
         }
 
         // Get subjects assigned to this teacher
@@ -79,7 +80,7 @@ export async function GET() {
 
             // Get all attendance records for these sessions
             const { data: attendanceRecords } = await supabase
-                .from('attendance')
+                .from('attendance_records')
                 .select('student_id, status')
                 .in('session_id', sessionIds);
 

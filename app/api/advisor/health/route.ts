@@ -97,7 +97,7 @@ async function calculateHealthStats(supabase: any, studentIds: string[]) {
 
     for (const studentId of studentIds) {
         const { data: attendanceRecords } = await supabase
-            .from('attendance')
+            .from('attendance_records')
             .select('status')
             .eq('student_id', studentId);
 
@@ -125,7 +125,7 @@ async function calculateHealthStats(supabase: any, studentIds: string[]) {
     if (todaySessions && todaySessions.length > 0) {
         const sessionIds = todaySessions.map((s: any) => s.id);
         const { data: todayAttendance } = await supabase
-            .from('attendance')
+            .from('attendance_records')
             .select('student_id, status')
             .in('session_id', sessionIds)
             .in('student_id', studentIds);

@@ -1,23 +1,16 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { getAuthorizedUser } from '@/lib/api-auth';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
     try {
-        const supabase = await createServerClient();
+        const auth = await getAuthorizedUser();
+        if (auth.error) return auth.error;
 
-        // Get token from header
-        const authHeader = request.headers.get('Authorization');
-        const token = authHeader?.split(' ')[1];
+        const { supabase, profile, user } = auth;
 
-        if (!token) {
-            return NextResponse.json({ error: 'Missing authorization token' }, { status: 401 });
-        }
-
-        const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-        if (authError || !user) {
-            return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+        if (profile.role !== 'teacher' && profile.role !== 'admin') {
+            return NextResponse.json({ error: 'Forbidden: Teacher access required' }, { status: 403 });
         }
 
         // Get teacher profile
@@ -28,7 +21,7 @@ export async function GET(request: NextRequest) {
             .single();
 
         if (teacherError || !teacher) {
-            return NextResponse.json({ error: 'Teacher profile not found' }, { status: 403 });
+            return NextResponse.json({ error: 'Teacher record not found. Please contact an administrator.' }, { status: 404 });
         }
 
         // Fetch sessions with section/batch info
@@ -65,20 +58,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
     try {
-        const supabase = await createServerClient();
+        const auth = await getAuthorizedUser();
+        if (auth.error) return auth.error;
 
-        // Get token from header
-        const authHeader = request.headers.get('Authorization');
-        const token = authHeader?.split(' ')[1];
+        const { supabase, profile, user } = auth;
 
-        if (!token) {
-            return NextResponse.json({ error: 'Missing authorization token' }, { status: 401 });
-        }
-
-        const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-        if (authError || !user) {
-            return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+        if (profile.role !== 'teacher' && profile.role !== 'admin') {
+            return NextResponse.json({ error: 'Forbidden: Teacher access required' }, { status: 403 });
         }
 
         // Get teacher profile
@@ -89,7 +75,7 @@ export async function POST(request: NextRequest) {
             .single();
 
         if (teacherError || !teacher) {
-            return NextResponse.json({ error: 'Teacher profile not found' }, { status: 403 });
+            return NextResponse.json({ error: 'Teacher record not found. Please contact an administrator.' }, { status: 404 });
         }
 
         const body = await request.json();
