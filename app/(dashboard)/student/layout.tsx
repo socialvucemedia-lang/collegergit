@@ -2,7 +2,9 @@
 
 import { Home, Calendar, User, Bell, LogOut } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
+import { useAuth } from '@/hooks/useAuth';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 
 export default function StudentLayout({
     children,
@@ -10,10 +12,10 @@ export default function StudentLayout({
     children: React.ReactNode;
 }) {
     const pathname = usePathname();
-    const router = useRouter();
+    const { signOut } = useAuth();
 
-    const handleLogout = () => {
-        router.push('/login');
+    const handleLogout = async () => {
+        await signOut();
     };
 
     const navItems = [
@@ -23,7 +25,8 @@ export default function StudentLayout({
     ];
 
     return (
-        <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 pb-24">
+        <ProtectedRoute requiredRole="student">
+            <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 pb-24">
             {/* Top Bar - Minimal */}
             <header className="fixed top-0 left-0 right-0 h-14 bg-neutral-50/80 dark:bg-neutral-950/80 backdrop-blur-md z-40 px-4 flex items-center justify-between">
                 <span className="font-bold text-lg text-neutral-900 dark:text-neutral-100">Student Portal</span>
@@ -69,5 +72,6 @@ export default function StudentLayout({
                 </div>
             </nav>
         </div>
+        </ProtectedRoute>
     );
 }

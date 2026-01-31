@@ -1,13 +1,18 @@
 "use client";
 
-import { useState } from 'react';
+
+import Link from 'next/link';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, ShieldCheck, GraduationCap, Users } from 'lucide-react';
+import { User, ShieldCheck, GraduationCap, Users, AlertCircle } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useRouter } from 'next/navigation';
+import { signIn, signOut } from '@/lib/auth';
+import { useAuth } from '@/hooks/useAuth';
+import { toast } from 'sonner';
 
 type Role = 'student' | 'teacher' | 'advisor' | 'admin';
 
@@ -21,20 +26,77 @@ const ROLES: { id: Role; label: string; icon: React.ElementType; description: st
 export default function LoginPage() {
     const [selectedRole, setSelectedRole] = useState<Role | null>(null);
     const [credentials, setCredentials] = useState({ email: '', password: '' });
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const router = useRouter();
+    const { user, refreshUser } = useAuth();
 
-    const handleLogin = (e: React.FormEvent) => {
+    // Redirect if already authenticated
+    useEffect(() => {
+        if (user) {
+            router.push(`/${user.role}`);
+        }
+    }, [user, router]);
+
+    const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!selectedRole) return;
 
-        // Restriction Check
-        if (credentials.email !== 'admin@mctrgit.ac.in' || credentials.password !== 'admin') {
-            alert("Access Restricted: Only admin@mctrgit.ac.in allowed.");
-            return;
-        }
+        setError(null);
+        setIsLoading(true);
 
-        // Mock login - in production this would be real auth
-        router.push(`/${selectedRole}`);
+        try {
+            // Sign in with Supabase Auth
+            const { user: authUser } = await signIn(credentials.email, credentials.password);
+
+            if (!authUser) {
+                throw new Error('Authentication failed');
+            }
+
+            // Wait a bit for auth state to propagate, then refresh user profile
+            await new Promise(resolve => setTimeout(resolve, 200));
+            await refreshUser();
+
+            // Get user profile via API (bypasses RLS)
+            const profileRes = await fetch('/api/auth/profile');
+            const profileData = await profileRes.json();
+
+            if (!profileRes.ok || !profileData.profile) {
+                await signOut();
+                throw new Error(
+                    profileData.hint ||
+                    'User profile not found. Please create a user profile in the database.'
+                );
+            }
+
+            const userProfile = profileData.profile;
+
+            // Check if role is null
+            if (!userProfile.role) {
+                await signOut();
+                throw new Error(
+                    'User role is not set. Please update the user profile in the database. ' +
+                    `UPDATE public.users SET role = '${selectedRole}' WHERE id = '${authUser.id}';`
+                );
+            }
+
+            // Verify role matches
+            if (userProfile.role !== selectedRole) {
+                await signOut();
+                throw new Error(`This account is registered as ${userProfile.role}, not ${selectedRole}. Please select the correct role or contact an administrator to update your role.`);
+            }
+
+            toast.success('Logged in successfully');
+
+            // Redirect to dashboard
+            router.push(`/${selectedRole}`);
+        } catch (err: any) {
+            const errorMessage = err.message || 'Login failed. Please check your credentials.';
+            setError(errorMessage);
+            toast.error(errorMessage);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -142,7 +204,15 @@ export default function LoginPage() {
                                                 />
                                             </div>
                                             <div className="space-y-2">
-                                                <Label htmlFor="password">Password</Label>
+                                                <div className="flex items-center justify-between">
+                                                    <Label htmlFor="password">Password</Label>
+                                                    <Link
+                                                        href="/forgot-password"
+                                                        className="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-300 transition-colors"
+                                                    >
+                                                        Forgot password?
+                                                    </Link>
+                                                </div>
                                                 <Input
                                                     id="password"
                                                     type="password"
@@ -155,8 +225,19 @@ export default function LoginPage() {
                                         </div>
                                     )}
 
-                                    <Button type="submit" className="w-full bg-neutral-900 text-white dark:bg-white dark:text-black hover:bg-neutral-800 dark:hover:bg-neutral-200">
-                                        Enter Portal
+                                    {error && (
+                                        <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-md text-sm text-red-600 dark:text-red-400">
+                                            <AlertCircle size={16} />
+                                            <span>{error}</span>
+                                        </div>
+                                    )}
+
+                                    <Button
+                                        type="submit"
+                                        disabled={isLoading}
+                                        className="w-full bg-neutral-900 text-white dark:bg-white dark:text-black hover:bg-neutral-800 dark:hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {isLoading ? 'Signing in...' : 'Enter Portal'}
                                     </Button>
                                 </form>
                             </Card>
