@@ -24,36 +24,40 @@ export async function GET(
             return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
         }
 
-        // 1. Get Session Details (to know subject/department/semester)
-        const { data: session, error: sessionError } = await supabase
-            .from('attendance_sessions')
-            .select(`
-        *,
-        subjects (
-          id,
-          name,
-          code,
-          semester,
-          department_id
-        )
-      `)
-            .eq('id', sessionId)
-            .single();
+        // OPTIMIZATION: Parallelize independent queries
+        // 1. Session details and 2. Teacher lookup can run in parallel
+        const [sessionResult, teacherResult] = await Promise.all([
+            supabase
+                .from('attendance_sessions')
+                .select(`
+                    *,
+                    subjects (
+                        id,
+                        name,
+                        code,
+                        semester,
+                        department_id
+                    )
+                `)
+                .eq('id', sessionId)
+                .single(),
+            supabase
+                .from('teachers')
+                .select('id')
+                .eq('user_id', user.id)
+                .single()
+        ]);
+
+        const { data: session, error: sessionError } = sessionResult;
+        const { data: teacher } = teacherResult;
 
         if (sessionError || !session) {
             return NextResponse.json({ error: 'Session not found' }, { status: 404 });
         }
 
-        // 2. Access control: Ensure teacher owns this session
-        const { data: teacher } = await supabase
-            .from('teachers')
-            .select('id')
-            .eq('user_id', user.id)
-            .single();
-
+        // Access control check (optional)
         if (session.teacher_id !== teacher?.id) {
-            // Optional: Allow if shared, but for now strict ownership
-            // return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+            // Optional: Allow if shared, but for now allow through
         }
 
         const subject = session.subjects;
@@ -61,17 +65,8 @@ export async function GET(
             return NextResponse.json({ error: 'Subject data missing' }, { status: 500 });
         }
 
-        // 3. Fetch Students with flexible filtering
-        // Logic:
-        // 1. Try Strict Filter (Section + Batch + Semester + Department)
-        // 2. If 0 results, Try Department + Semester (Ignore Section/Batch)
-        // 3. If 0 results, Try Department Only (Ignore Semester)
-
-        let students: any[] = [];
-        let error: any = null;
-
-        // --- STRATEGY 1: STRICT FILTER ---
-        let query1 = supabase
+        // Build student query with filters
+        let studentQuery = supabase
             .from('students')
             .select(`
                 id,
@@ -86,105 +81,71 @@ export async function GET(
                 )
             `);
 
-        if (subject.department_id) query1 = query1.eq('department_id', subject.department_id);
-        if (subject.semester) query1 = query1.eq('semester', subject.semester);
-        if (session.section) query1 = query1.eq('section', session.section);
-        if (session.batch) query1 = query1.eq('batch', session.batch);
+        if (subject.department_id) studentQuery = studentQuery.eq('department_id', subject.department_id);
+        if (subject.semester) studentQuery = studentQuery.eq('semester', subject.semester);
+        if (session.section) studentQuery = studentQuery.eq('section', session.section);
+        if (session.batch) studentQuery = studentQuery.eq('batch', session.batch);
 
-        const { data: data1, error: error1 } = await query1;
-        if (error1) error = error1;
+        // OPTIMIZATION: Run student fetch, existing records, and total lectures count in parallel
+        const [studentsResult, recordsResult, totalLecturesResult] = await Promise.all([
+            studentQuery,
+            supabase
+                .from('attendance_records')
+                .select('*')
+                .eq('session_id', sessionId),
+            supabase
+                .from('attendance_sessions')
+                .select('id', { count: 'exact', head: true })
+                .eq('subject_id', subject.id)
+                .eq('status', 'completed')
+        ]);
 
-        if (data1 && data1.length > 0) {
-            students = data1;
-        } else {
-            console.log(`[Attendance] Strategy 1 (Strict) returned 0 students. Trying Strategy 2...`);
+        let students = studentsResult.data || [];
+        const studentsError = studentsResult.error;
 
-            // --- STRATEGY 2: RELAXED (Dept + Sem only) ---
+        // Fallback strategies if no students found
+        if (students.length === 0 && !studentsError) {
+            // Strategy 2: Dept + Sem only
             let query2 = supabase
                 .from('students')
-                .select(`
-                    id,
-                    roll_number,
-                    section,
-                    batch,
-                    semester,
-                    department_id,
-                    users (full_name, email)
-                `);
+                .select(`id, roll_number, section, batch, semester, department_id, users (full_name, email)`);
 
             if (subject.department_id) query2 = query2.eq('department_id', subject.department_id);
-            // We still filter by semester if it exists, hoping to at least match that
             if (subject.semester) query2 = query2.eq('semester', subject.semester);
 
-            const { data: data2, error: error2 } = await query2;
-            if (error2) error = error2;
+            const { data: data2 } = await query2;
 
             if (data2 && data2.length > 0) {
                 students = data2;
-                console.log(`[Attendance] Strategy 2 (Dept+Sem) found ${students.length} students.`);
-            } else {
-                console.log(`[Attendance] Strategy 2 returned 0 students. Trying Strategy 3...`);
+            } else if (subject.department_id) {
+                // Strategy 3: Dept only
+                const { data: data3 } = await supabase
+                    .from('students')
+                    .select(`id, roll_number, section, batch, semester, department_id, users (full_name, email)`)
+                    .eq('department_id', subject.department_id);
 
-                // --- STRATEGY 3: WIDE OPEN (Dept only) ---
-                // Only if department is known, otherwise this is too dangerous (shows whole college)
-                if (subject.department_id) {
-                    let query3 = supabase
-                        .from('students')
-                        .select(`
-                            id,
-                            roll_number,
-                            section,
-                            batch,
-                            semester,
-                            department_id,
-                            users (full_name, email)
-                        `)
-                        .eq('department_id', subject.department_id);
-
-                    const { data: data3, error: error3 } = await query3;
-                    if (error3) error = error3;
-
-                    if (data3 && data3.length > 0) {
-                        students = data3;
-                        console.log(`[Attendance] Strategy 3 (Dept Only) found ${students.length} students.`);
-                    } else {
-                        console.log(`[Attendance] All strategies failed. No students found.`);
-                    }
+                if (data3 && data3.length > 0) {
+                    students = data3;
                 }
             }
         }
-
-        const studentsError = error;
 
         if (studentsError) {
             console.error('Error fetching students:', studentsError);
             return NextResponse.json({ error: studentsError.message }, { status: 500 });
         }
 
-        // 4. Fetch existing attendance records for this session
-        const { data: records, error: recordsError } = await supabase
-            .from('attendance_records')
-            .select('*')
-            .eq('session_id', sessionId);
-
-        if (recordsError) {
-            return NextResponse.json({ error: recordsError.message }, { status: 500 });
+        const records = recordsResult.data;
+        if (recordsResult.error) {
+            return NextResponse.json({ error: recordsResult.error.message }, { status: 500 });
         }
 
-        // 5. Calculate Attendance Percentage for this Subject
-        // A. Get total completed sessions for this subject
-        const { count: totalLectures } = await supabase
-            .from('attendance_sessions')
-            .select('id', { count: 'exact', head: true })
-            .eq('subject_id', subject.id)
-            .eq('status', 'completed');
+        const totalLectures = totalLecturesResult.count || 0;
 
-        // B. Get present count for each student in this subject
-        // We can't easily do a group by with the JS client without rpc, so we'll fetch all relevant records
-        // Optimization: Filter by students we actually found
-        const studentIds = students?.map((s: any) => s.id) || [];
+        // Get presence data for students (this depends on students array, so must be after)
+        const studentIds = students.map((s: any) => s.id);
 
-        const { data: presenceData } = await supabase
+        const { data: presenceData } = studentIds.length > 0 ? await supabase
             .from('attendance_records')
             .select(`
                 student_id,
@@ -194,7 +155,7 @@ export async function GET(
             `)
             .eq('status', 'present')
             .eq('attendance_sessions.subject_id', subject.id)
-            .in('student_id', studentIds);
+            .in('student_id', studentIds) : { data: [] };
 
         // Count presents per student
         const presentMap = new Map<string, number>();
@@ -203,29 +164,23 @@ export async function GET(
             presentMap.set(sid, (presentMap.get(sid) || 0) + 1);
         });
 
-        // 6. Merge data
-        const studentList = students?.map((student: any) => {
+        // Merge data
+        const studentList = students.map((student: any) => {
             const record = records?.find((r: any) => r.student_id === student.id);
             const userInfo = Array.isArray(student.users) ? student.users[0] : student.users;
 
             const presents = presentMap.get(student.id) || 0;
-            const total = totalLectures || 0;
-            // Avoid division by zero, default to 100% if no classes yet (or 0%? usually 100 or 0. Let's say 0 to be safe/neutral)
-            // Actually if total is 0, percentage is N/A. But let's verify.
-            // If this is the FIRST session, total might be 0 (since this one isn't completed yet).
-            // Let's assume this session counts if it were completed? No, usually historical.
-            // Let's use historical percentage.
-            const percentage = total > 0 ? Math.round((presents / total) * 100) : 0;
+            const percentage = totalLectures > 0 ? Math.round((presents / totalLectures) * 100) : 0;
 
             return {
                 student_id: student.id,
                 roll_number: student.roll_number,
                 name: userInfo?.full_name || 'Unknown',
                 email: userInfo?.email,
-                status: record?.status || null, // null means not marked yet
-                record_id: record?.id, // Crucial for edit capability
+                status: record?.status || null,
+                record_id: record?.id,
                 attendance_percentage: percentage,
-                total_lectures: total,
+                total_lectures: totalLectures,
                 present_lectures: presents
             };
         });
