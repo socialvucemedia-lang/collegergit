@@ -85,14 +85,14 @@ export async function GET(request: NextRequest) {
 
                 const sessionIds = sessions.map(s => s.id);
 
-                const { data: attendanceRecords } = await supabase
-                    .from('attendance')
+                const { data: attendanceData } = await supabase
+                    .from('attendance_records')
                     .select('status')
                     .eq('student_id', student.id)
                     .in('session_id', sessionIds);
 
-                const total = attendanceRecords?.length || 0;
-                const present = attendanceRecords?.filter(a => a.status === 'present' || a.status === 'late').length || 0;
+                const total = attendanceData?.length || 0;
+                const present = attendanceData?.filter(a => a.status === 'present' || a.status === 'late').length || 0;
                 const percentage = total > 0 ? Math.round((present / total) * 100) : null;
 
                 rowData.push(percentage !== null ? `${percentage}%` : '-');

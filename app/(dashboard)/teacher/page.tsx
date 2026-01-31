@@ -114,75 +114,90 @@ export default function TeacherDashboard() {
         const isVirtual = item.type === 'virtual';
         const session = item.data;
 
-        // Link logic:
-        // If real -> /teacher/attendance/[id]
-        // If virtual -> /teacher/attendance/new?subject_id=...
         const linkHref = isVirtual
             ? `/teacher/attendance/new?subject_id=${session.subject_id}&section=${session.section}&start_time=${session.start_time}&end_time=${session.end_time}`
             : `/teacher/attendance/${session.id}`;
 
-        const statusColor = session.status === 'completed' ? 'border-l-green-500' :
-            session.status === 'active' ? 'border-l-blue-500' :
-                'border-l-neutral-300 dark:border-l-neutral-700';
+        const isCompleted = session.status === 'completed';
+        const isActive = session.status === 'active';
 
         return (
             <Link href={linkHref} key={session.id} className="block group">
                 <Card className={cn(
-                    "p-5 transition-all hover:bg-neutral-50 dark:hover:bg-neutral-900 border-l-4 relative overflow-hidden",
-                    statusColor,
-                    isVirtual && "border-dashed bg-neutral-50/50 dark:bg-neutral-900/20"
+                    "relative overflow-hidden transition-all duration-300 border-2",
+                    isActive ? "border-blue-500/50 shadow-lg shadow-blue-500/10 dark:shadow-blue-500/5" : "border-transparent hover:border-neutral-200 dark:hover:border-neutral-800",
+                    isVirtual ? "bg-neutral-50/50 dark:bg-neutral-900/20 border-dashed border-neutral-200 dark:border-neutral-800" : "bg-white dark:bg-neutral-900"
                 )}>
-                    {isVirtual && (
-                        <div className="absolute top-0 right-0 px-3 py-1 bg-neutral-100 dark:bg-neutral-800 text-[10px] font-bold uppercase text-neutral-500 rounded-bl-xl">
-                            Scheduled
+                    {isActive && (
+                        <div className="absolute top-0 right-0 px-3 py-1 bg-blue-500 text-white text-[10px] font-bold uppercase rounded-bl-xl z-10">
+                            Live Now
                         </div>
                     )}
 
-                    <div className="flex justify-between items-start">
-                        <div className="space-y-3">
-                            <div>
+                    <div className="p-5">
+                        <div className="flex justify-between items-start mb-5">
+                            <div className="space-y-1">
                                 <h3 className="text-lg font-bold text-neutral-900 dark:text-neutral-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                                     {session.subjects.name}
                                 </h3>
-                                <div className="flex items-center gap-3 mt-1 text-sm text-neutral-500">
-                                    <Badge variant="secondary" className="font-mono text-[10px] px-2">
+                                <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className="font-mono text-[10px] text-neutral-500 border-neutral-200 dark:border-neutral-800">
                                         {session.subjects.code}
                                     </Badge>
-                                    <div className="flex items-center gap-1 font-medium text-neutral-700 dark:text-neutral-300">
-                                        <Users size={14} />
-                                        <span>Division {item.division}</span>
-                                        {item.data.batch && <span className="text-neutral-400 text-xs ml-1">({item.data.batch})</span>}
-                                    </div>
+                                    {item.data.batch && (
+                                        <Badge variant="secondary" className="text-[10px] bg-purple-50 text-purple-700 dark:bg-purple-900/20 dark:text-purple-300">
+                                            Batch {item.data.batch}
+                                        </Badge>
+                                    )}
                                 </div>
                             </div>
 
-                            <div className="flex items-center gap-4 text-xs font-medium text-neutral-500">
-                                <div className="flex items-center gap-1.5 bg-neutral-100 dark:bg-neutral-800 px-2 py-1 rounded-md">
-                                    <Clock size={12} />
-                                    {session.start_time.slice(0, 5)} - {session.end_time.slice(0, 5)}
-                                </div>
-                                {session.room && (
-                                    <div className="flex items-center gap-1.5">
-                                        <MapPin size={12} />
-                                        Room {session.room}
-                                    </div>
-                                )}
+                            <div className={cn(
+                                "flex items-center justify-center w-10 h-10 rounded-full transition-colors",
+                                isCompleted ? "bg-green-100 dark:bg-green-900/30 text-green-600" :
+                                    isActive ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600" :
+                                        "bg-neutral-100 dark:bg-neutral-800 text-neutral-400 group-hover:bg-neutral-200 dark:group-hover:bg-neutral-700"
+                            )}>
+                                {isCompleted ? <CheckCircle2 size={20} /> : <ChevronRight size={20} />}
                             </div>
                         </div>
 
-                        <div className="self-center">
-                            {session.status === 'completed' ? (
-                                <div className="h-10 w-10 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center text-green-600 dark:text-green-400">
-                                    <CheckCircle2 size={20} />
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                            <div className="flex items-center gap-3 p-2.5 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-100 dark:border-neutral-800/50">
+                                <div className="p-1.5 bg-white dark:bg-neutral-800 rounded-md text-neutral-500 shadow-sm">
+                                    <Clock size={14} />
                                 </div>
-                            ) : (
-                                <div className={cn(
-                                    "h-10 w-10 rounded-full flex items-center justify-center transition-all",
-                                    isVirtual ? "bg-neutral-100 dark:bg-neutral-800 text-neutral-400 group-hover:bg-blue-100 group-hover:text-blue-600" : "bg-blue-100 dark:bg-blue-900/30 text-blue-600"
-                                )}>
-                                    <ChevronRight size={20} />
+                                <div className="flex flex-col">
+                                    <span className="text-[10px] uppercase font-bold text-neutral-400">Time</span>
+                                    <span className="font-semibold text-neutral-700 dark:text-neutral-300">
+                                        {session.start_time.slice(0, 5)} - {session.end_time.slice(0, 5)}
+                                    </span>
                                 </div>
-                            )}
+                            </div>
+
+                            <div className="flex items-center gap-3 p-2.5 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-100 dark:border-neutral-800/50">
+                                <div className="p-1.5 bg-white dark:bg-neutral-800 rounded-md text-neutral-500 shadow-sm">
+                                    <MapPin size={14} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[10px] uppercase font-bold text-neutral-400">Classroom</span>
+                                    <span className="font-semibold text-neutral-700 dark:text-neutral-300">
+                                        {session.room || 'Not Assigned'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="col-span-2 flex items-center gap-3 p-2.5 rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-100 dark:border-neutral-800/50">
+                                <div className="p-1.5 bg-white dark:bg-neutral-800 rounded-md text-neutral-500 shadow-sm">
+                                    <Users size={14} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[10px] uppercase font-bold text-neutral-400">Target Audience</span>
+                                    <span className="font-semibold text-neutral-700 dark:text-neutral-300">
+                                        Division {item.division} {item.data.batch ? `• Batch ${item.data.batch}` : '• Entire Class'}
+                                    </span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </Card>

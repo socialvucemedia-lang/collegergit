@@ -63,15 +63,13 @@ export async function GET(request: NextRequest) {
 
         for (const student of students) {
             // Get attendance records for this student
-            const { data: attendanceRecords, error: attendanceError } = await supabase
-                .from('attendance')
+            const { data: attendanceData, error: attError } = await supabase
+                .from('attendance_records')
                 .select('status')
                 .eq('student_id', student.id);
 
-            if (attendanceError) continue;
-
-            const total = attendanceRecords?.length || 0;
-            const present = attendanceRecords?.filter(a => a.status === 'present' || a.status === 'late').length || 0;
+            const total = attendanceData?.length || 0;
+            const present = attendanceData?.filter(a => a.status === 'present' || a.status === 'late').length || 0;
             const percentage = total > 0 ? Math.round((present / total) * 100) : null;
 
             if (percentage !== null && percentage < threshold) {

@@ -43,18 +43,21 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
 
   if (!authUser) return null;
 
-  const { data: userProfile, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', authUser.id)
-    .single();
+  try {
+    const res = await fetch('/api/auth/profile');
+    if (!res.ok) return null;
 
-  if (error || !userProfile) return null;
+    const { profile } = await res.json();
+    if (!profile) return null;
 
-  return {
-    ...userProfile,
-    auth: authUser,
-  } as AuthUser;
+    return {
+      ...profile,
+      auth: authUser,
+    } as AuthUser;
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    return null;
+  }
 }
 
 /**

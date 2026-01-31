@@ -1,136 +1,150 @@
+
 "use client";
 
-import { Download, FileText, Users, AlertTriangle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
-import { Student } from "@/types/student";
-import studentData from "@/data/students.json";
-import { useMemo } from "react";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { Download, FileSpreadsheet, Loader2, Users } from "lucide-react";
+import { toast } from "sonner";
+
+// Sample batches - in a real app, perhaps fetch these or use standard ones
+// The user request mentioned B1, B2, B3
+const BATCHES = ["B1", "B2", "B3", "A1", "A2", "A3"];
+
+type ReportType = "full" | "batch" | "defaulter";
 
 export default function DownloadsPage() {
-    // 1. Enrich student data with mock attendance (consistent with risks page)
-    const enrichedStudents = useMemo(() => {
-        return (studentData as Student[]).map(s => {
-            const attendance = s.attendanceRate || (Math.floor(Math.sin(Number(s.rollNumber)) * 20) + 70);
-            return {
-                ...s,
-                attendance,
-                batch: getBatch(Number(s.rollNumber))
-            };
-        });
-    }, []);
+    const [reportType, setReportType] = useState<ReportType>("full");
+    const [selectedBatch, setSelectedBatch] = useState<string>("B1");
+    const [downloading, setDownloading] = useState(false);
 
-    function getBatch(roll: number) {
-        if (roll >= 201 && roll <= 220) return "B1";
-        if (roll >= 221 && roll <= 240) return "B2";
-        if (roll >= 241) return "B3";
-        return "Unknown";
-    }
+    const handleDownload = async () => {
+        setDownloading(true);
+        try {
+            const params = new URLSearchParams({
+                type: reportType
+            });
 
-    // 2. CSV Generation Logic
-    const downloadCSV = (filename: string, data: any[]) => {
-        const headers = ["Roll Number", "Name", "Batch", "Attendance %", "Status"];
-        const csvContent = [
-            headers.join(","),
-            ...data.map(row => [
-                row.rollNumber,
-                `"${row.name}"`, // Quote name to handle commas
-                row.batch,
-                row.attendance,
-                row.attendance < 75 ? "Defaulter" : "Safe"
-            ].join(","))
-        ].join("\n");
+            if (reportType === "batch") {
+                params.append("batch", selectedBatch);
+            }
 
-        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-        const link = document.createElement("a");
-        const url = URL.createObjectURL(blob);
-        link.setAttribute("href", url);
-        link.setAttribute("download", `${filename}.csv`);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    };
+            const response = await fetch(`/api/advisor/reports?${params}`);
 
-    const handleDownloadComplete = () => {
-        downloadCSV("Complete_Class_Attendance", enrichedStudents);
-    };
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || "Download failed");
+            }
 
-    const handleDownloadBatch = (batch: string) => {
-        const batchData = enrichedStudents.filter(s => s.batch === batch);
-        downloadCSV(`Batch_${batch}_Attendance`, batchData);
-    };
+            // Trigger file download
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
 
-    const handleDownloadDefaulters = () => {
-        const defaulters = enrichedStudents.filter(s => s.attendance < 75);
-        downloadCSV("Defaulter_List", defaulters);
+            const timestamp = new Date().toISOString().split('T')[0];
+            let filename = `attendance_report_${reportType}_${timestamp}.csv`;
+            if (reportType === "batch") {
+                filename = `attendance_${selectedBatch}_${timestamp}.csv`;
+            } else if (reportType === "defaulter") {
+                filename = `defaulters_list_${timestamp}.csv`;
+            }
+
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+
+            toast.success("Report downloaded successfully");
+        } catch (error: any) {
+            console.error("Download error:", error);
+            toast.error(error.message || "Failed to download report");
+        } finally {
+            setDownloading(false);
+        }
     };
 
     return (
         <div className="space-y-6 pb-20">
             <div className="space-y-1">
-                <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">Reports & Downloads</h1>
-                <p className="text-neutral-500">Export attendance data and reports</p>
+                <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">Downloads</h1>
+                <p className="text-neutral-500">Generate and download attendance reports</p>
             </div>
 
-            <div className="grid gap-6">
-                {/* 1. Complete Class Report */}
-                <Card className="p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div className="flex items-center gap-4">
-                        <div className="h-12 w-12 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 dark:text-blue-400">
-                            <FileText size={24} />
-                        </div>
-                        <div>
-                            <h3 className="font-semibold text-lg text-neutral-900 dark:text-neutral-100">Complete Class Report</h3>
-                            <p className="text-sm text-neutral-500">Full attendance sheet for all students (Roll 201-260)</p>
+            <Card className="p-8 space-y-8 shadow-sm border max-w-2xl">
+                <div className="space-y-6">
+                    <div className="space-y-3">
+                        <Label className="text-base font-semibold">Report Type</Label>
+                        <Select value={reportType} onValueChange={(v) => setReportType(v as ReportType)}>
+                            <SelectTrigger className="h-11">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="full">Entire Class Attendance</SelectItem>
+                                <SelectItem value="batch">Specific Batch Attendance</SelectItem>
+                                <SelectItem value="defaulter">Defaulter List (Below 75%)</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <div className="text-sm text-neutral-500 bg-neutral-50 dark:bg-neutral-900 p-3 rounded-md border border-neutral-100 dark:border-neutral-800">
+                            {reportType === "full" && "Download compilation of all subjects for the entire class."}
+                            {reportType === "batch" && "Download attendance only for a specific batch."}
+                            {reportType === "defaulter" && "List of students with aggregate attendance below 75%."}
                         </div>
                     </div>
-                    <Button onClick={handleDownloadComplete} className="w-full sm:w-auto">
-                        <Download className="mr-2 h-4 w-4" />
-                        Download CSV
-                    </Button>
-                </Card>
 
-                {/* 2. Batch-wise Reports */}
-                <Card className="p-6 space-y-4">
-                    <div className="flex items-center gap-4">
-                        <div className="h-12 w-12 rounded-lg bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center text-purple-600 dark:text-purple-400">
-                            <Users size={24} />
+                    {reportType === "batch" && (
+                        <div className="space-y-3 animate-in slide-in-from-top-2 fade-in duration-200">
+                            <Label className="text-base font-semibold">Select Batch</Label>
+                            <Select value={selectedBatch} onValueChange={setSelectedBatch}>
+                                <SelectTrigger className="h-11">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {BATCHES.map(b => (
+                                        <SelectItem key={b} value={b}>{b}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
-                        <div>
-                            <h3 className="font-semibold text-lg text-neutral-900 dark:text-neutral-100">Batch-wise Reports</h3>
-                            <p className="text-sm text-neutral-500">Download attendance for specific practical batches</p>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pl-0 sm:pl-16">
-                        <Button variant="outline" onClick={() => handleDownloadBatch("B1")} className="justify-between group">
-                            Batch B1 <span className="text-xs text-neutral-400 group-hover:text-neutral-600">201-220</span> <Download className="h-3 w-3 opacity-50" />
-                        </Button>
-                        <Button variant="outline" onClick={() => handleDownloadBatch("B2")} className="justify-between group">
-                            Batch B2 <span className="text-xs text-neutral-400 group-hover:text-neutral-600">221-240</span> <Download className="h-3 w-3 opacity-50" />
-                        </Button>
-                        <Button variant="outline" onClick={() => handleDownloadBatch("B3")} className="justify-between group">
-                            Batch B3 <span className="text-xs text-neutral-400 group-hover:text-neutral-600">241-260+</span> <Download className="h-3 w-3 opacity-50" />
-                        </Button>
-                    </div>
-                </Card>
+                    )}
 
-                {/* 3. Defaulter List */}
-                <Card className="p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-red-100 dark:border-red-900/30">
-                    <div className="flex items-center gap-4">
-                        <div className="h-12 w-12 rounded-lg bg-red-50 dark:bg-red-900/20 flex items-center justify-center text-red-600 dark:text-red-400">
-                            <AlertTriangle size={24} />
-                        </div>
-                        <div>
-                            <h3 className="font-semibold text-lg text-neutral-900 dark:text-neutral-100">Defaulter List</h3>
-                            <p className="text-sm text-neutral-500">Students with attendance below 75%</p>
-                        </div>
+                    <div className="pt-2">
+                        <Button
+                            className="w-full h-12 text-base font-medium transition-all shadow-sm hover:shadow active:scale-[0.98]"
+                            onClick={handleDownload}
+                            disabled={downloading}
+                        >
+                            {downloading ? (
+                                <>
+                                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                    Generating Report...
+                                </>
+                            ) : (
+                                <>
+                                    <Download className="mr-2 h-5 w-5" />
+                                    Download CSV Report
+                                </>
+                            )}
+                        </Button>
                     </div>
-                    <Button variant="destructive" onClick={handleDownloadDefaulters} className="w-full sm:w-auto bg-red-600 hover:bg-red-700">
-                        <Download className="mr-2 h-4 w-4" />
-                        Download PDF/CSV
-                    </Button>
-                </Card>
+                </div>
+            </Card>
+
+            <div className="max-w-2xl">
+                <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30 p-4 rounded-lg flex gap-4 text-blue-800 dark:text-blue-200">
+                    <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-full h-fit">
+                        <FileSpreadsheet className="shrink-0" size={18} />
+                    </div>
+                    <div>
+                        <p className="font-semibold mb-1 text-sm">About Reports</p>
+                        <p className="opacity-90 text-sm leading-relaxed">
+                            All generated reports include a detailed subject-wise breakdown of attendance percentages along with a final Total Aggregate score, ensuring complete transparency for academic review.
+                        </p>
+                    </div>
+                </div>
             </div>
         </div>
     );

@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, Users, AlertTriangle, Bell, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, AlertTriangle, Bell, LogOut, Download } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
@@ -22,6 +22,7 @@ export default function AdvisorLayout({
         { href: '/advisor', label: 'Overview', icon: LayoutDashboard },
         { href: '/advisor/students', label: 'Students', icon: Users },
         { href: '/advisor/risks', label: 'At Risk', icon: AlertTriangle },
+        { href: '/advisor/downloads', label: 'Downloads', icon: Download },
     ];
 
     return (

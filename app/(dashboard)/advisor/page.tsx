@@ -64,10 +64,10 @@ export default function AdvisorDashboard() {
 
             {/* Overall Attendance - Hero Card */}
             <Card className={cn(
-                "p-6 border-2",
-                avgAttendance >= 75 ? "border-green-200 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800" :
-                    avgAttendance >= 65 ? "border-yellow-200 bg-yellow-50/50 dark:bg-yellow-900/10 dark:border-yellow-800" :
-                        "border-red-200 bg-red-50/50 dark:bg-red-900/10 dark:border-red-800"
+                "p-8 border shadow-sm transition-all duration-200 hover:shadow-md",
+                avgAttendance >= 75 ? "bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-neutral-900 border-green-100 dark:border-green-900" :
+                    avgAttendance >= 65 ? "bg-gradient-to-br from-yellow-50 to-white dark:from-yellow-950/20 dark:to-neutral-900 border-yellow-100 dark:border-yellow-900" :
+                        "bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-neutral-900 border-red-100 dark:border-red-900"
             )}>
                 <div className="flex items-center justify-between">
                     <div>
@@ -90,33 +90,39 @@ export default function AdvisorDashboard() {
             </Card>
 
             {/* Quick Stats Grid */}
-            <div className="grid grid-cols-2 gap-4">
-                <Link href="/advisor/risks">
-                    <Card className="p-4 border-l-4 border-l-red-500 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-all">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 rounded-lg bg-red-50 dark:bg-red-900/20">
-                                <AlertTriangle size={20} className="text-red-600" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Link href="/advisor/risks" className="block">
+                    <Card className="h-full p-6 border shadow-sm hover:shadow-md hover:border-red-200 dark:hover:border-red-900 transition-all cursor-pointer group">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-600 group-hover:scale-110 transition-transform">
+                                <AlertTriangle size={24} />
                             </div>
-                            <div>
-                                <p className="text-2xl font-bold text-red-600">{data.below_threshold}</p>
-                                <p className="text-xs text-neutral-500">Below 75%</p>
-                            </div>
+                            <Badge variant="outline" className="border-red-100 text-red-600 bg-red-50 dark:border-red-900/50">
+                                Action Needed
+                            </Badge>
                         </div>
-                        <div className="flex items-center text-xs text-neutral-400 mt-3">
-                            View List <ChevronRight size={12} className="ml-1" />
+                        <div>
+                            <p className="text-3xl font-bold text-neutral-900 dark:text-neutral-50 mb-1">{data.below_threshold}</p>
+                            <p className="text-sm text-neutral-500 font-medium">Students Below 75%</p>
+                        </div>
+                        <div className="flex items-center text-xs font-medium text-red-600 mt-4 group-hover:translate-x-1 transition-transform">
+                            View Risk List <ChevronRight size={14} className="ml-1" />
                         </div>
                     </Card>
                 </Link>
 
-                <Card className="p-4 border-l-4 border-l-green-500">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-green-50 dark:bg-green-900/20">
-                            <TrendingUp size={20} className="text-green-600" />
+                <Card className="p-6 border shadow-sm">
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="p-3 rounded-xl bg-green-50 dark:bg-green-900/20 text-green-600">
+                            <TrendingUp size={24} />
                         </div>
-                        <div>
-                            <p className="text-2xl font-bold text-green-600">{data.present_today}</p>
-                            <p className="text-xs text-neutral-500">Present Today</p>
-                        </div>
+                        <Badge variant="outline" className="border-green-100 text-green-600 bg-green-50 dark:border-green-900/50">
+                            Today's Activity
+                        </Badge>
+                    </div>
+                    <div>
+                        <p className="text-3xl font-bold text-neutral-900 dark:text-neutral-50 mb-1">{data.present_today}</p>
+                        <p className="text-sm text-neutral-500 font-medium">Students Present Today</p>
                     </div>
                 </Card>
             </div>
@@ -126,17 +132,19 @@ export default function AdvisorDashboard() {
                 <h3 className="text-sm font-semibold text-neutral-500 uppercase tracking-wider">Quick Actions</h3>
 
                 <Link href="/advisor/students">
-                    <Card className="p-4 flex items-center justify-between hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-all">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20">
-                                <Users size={20} className="text-blue-600" />
+                    <Card className="p-5 flex items-center justify-between hover:shadow-md transition-all border group cursor-pointer">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-600 group-hover:scale-110 transition-transform">
+                                <Users size={22} />
                             </div>
                             <div>
-                                <p className="font-medium text-neutral-900 dark:text-neutral-100">View All Students</p>
-                                <p className="text-xs text-neutral-500">{data.total_students} enrolled</p>
+                                <p className="font-semibold text-neutral-900 dark:text-neutral-100 text-lg">Student Directory</p>
+                                <p className="text-sm text-neutral-500">Manage profiles for {data.total_students} students</p>
                             </div>
                         </div>
-                        <ChevronRight size={18} className="text-neutral-400" />
+                        <div className="h-8 w-8 rounded-full bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                            <ChevronRight size={16} />
+                        </div>
                     </Card>
                 </Link>
             </div>

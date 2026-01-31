@@ -57,23 +57,19 @@ export default function LoginPage() {
             await new Promise(resolve => setTimeout(resolve, 200));
             await refreshUser();
 
-            // Get user profile to verify role
-            const { supabase } = await import('@/lib/supabase');
-            const { data: userProfile, error: profileError } = await supabase
-                .from('users')
-                .select('role, email')
-                .eq('id', authUser.id)
-                .single();
+            // Get user profile via API (bypasses RLS)
+            const profileRes = await fetch('/api/auth/profile');
+            const profileData = await profileRes.json();
 
-            // Check if profile exists
-            if (profileError || !userProfile) {
+            if (!profileRes.ok || !profileData.profile) {
                 await signOut();
                 throw new Error(
-                    'User profile not found. Please create a user profile in the database. ' +
-                    'Go to Supabase Dashboard > SQL Editor and run: ' +
-                    `INSERT INTO public.users (id, email, role, full_name) VALUES ('${authUser.id}', '${authUser.email}', '${selectedRole}', 'User');`
+                    profileData.hint ||
+                    'User profile not found. Please create a user profile in the database.'
                 );
             }
+
+            const userProfile = profileData.profile;
 
             // Check if role is null
             if (!userProfile.role) {

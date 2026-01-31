@@ -103,20 +103,39 @@ export default function MarkAttendancePage() {
 
     const fetchData = async () => {
         try {
-            const { data: { session: currentSession } } = await supabase.auth.getSession();
+            const { data, error: authError } = await supabase.auth.getSession();
+            if (authError || !data.session) {
+                console.error("Auth error:", authError);
+                toast.error("Session expired. Please login again.");
+                router.push("/login?redirect=" + encodeURIComponent(window.location.pathname));
+                return;
+            }
+
             const response = await fetch(`/api/teacher/sessions/${sessionId}/attendance`, {
                 headers: {
-                    Authorization: `Bearer ${currentSession?.access_token}`,
+                    Authorization: `Bearer ${data.session.access_token}`,
                 },
             });
-            if (!response.ok) throw new Error("Failed to load data");
+            if (!response.ok) {
+                if (response.status === 401) {
+                    toast.error("Unauthorized. Please login again.");
+                    router.push("/login");
+                    return;
+                }
+                throw new Error("Failed to load data");
+            }
 
-            const data = await response.json();
-            setSession(data.session);
-            setStudents(data.students || []);
-        } catch (error) {
+            const resData = await response.json();
+            setSession(resData.session);
+            setStudents(resData.students || []);
+        } catch (error: any) {
             console.error(error);
-            toast.error("Failed to load attendance session");
+            if (error.message?.includes("Refresh Token")) {
+                toast.error("Session expired. Please login again.");
+                router.push("/login");
+            } else {
+                toast.error("Failed to load attendance session");
+            }
         } finally {
             setLoading(false);
         }
@@ -132,16 +151,18 @@ export default function MarkAttendancePage() {
         setStudents(prev => prev.map(s => ({ ...s, status })));
     };
 
-    const handleSave = async () => {
+    const handleSave = async (studentsData?: StudentRecord[]) => {
         setSaving(true);
+        const currentStudents = studentsData || students;
+
         try {
-            const unmarked = students.filter(s => !s.status);
+            const unmarked = currentStudents.filter(s => !s.status);
             if (unmarked.length > 0) {
                 toast.warning(`${unmarked.length} students are unmarked. They will be ignored.`);
             }
 
             const payload = {
-                records: students
+                records: currentStudents
                     .filter(s => s.status)
                     .map(s => ({
                         student_id: s.student_id,
@@ -149,22 +170,53 @@ export default function MarkAttendancePage() {
                     }))
             };
 
-            const { data: { session: currentSession } } = await supabase.auth.getSession();
-            const response = await fetch(`/api/teacher/sessions/${sessionId}/attendance`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${currentSession?.access_token}`,
-                },
-                body: JSON.stringify(payload),
-            });
+            const { data, error: authError } = await supabase.auth.getSession();
 
-            if (!response.ok) throw new Error("Failed to save");
+            if (authError || !data.session) {
+                toast.error("Session expired. Please login again.");
+                router.push("/login");
+                return;
+            }
 
-            toast.success("Attendance saved successfully!");
-            router.push("/teacher/attendance");
-        } catch (error) {
-            toast.error("Failed to save attendance");
+            // Add timeout signal (15 seconds)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+            try {
+                const response = await fetch(`/api/teacher/sessions/${sessionId}/attendance`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${data.session.access_token}`,
+                    },
+                    body: JSON.stringify(payload),
+                    signal: controller.signal
+                });
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        toast.error("Unauthorized. Please login again.");
+                        router.push("/login");
+                        return;
+                    }
+                    throw new Error("Failed to save");
+                }
+
+                toast.success("Attendance saved successfully!");
+                router.push("/teacher/attendance");
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        } catch (error: any) {
+            console.error(error);
+            if (error.name === 'AbortError') {
+                toast.error("Request timed out. Please try again.");
+            } else if (error.message?.includes("Refresh Token")) {
+                toast.error("Session expired. Please login again.");
+                router.push("/login");
+            } else {
+                toast.error("Failed to save attendance");
+            }
         } finally {
             setSaving(false);
         }
@@ -190,6 +242,11 @@ export default function MarkAttendancePage() {
         const student = students.find(s => s.student_id === studentId);
         if (!student) return;
 
+        // Clone current students to reflect the new change immediately for auto-save check
+        const updatedStudents = students.map(s =>
+            s.student_id === studentId ? { ...s, status } : s
+        );
+
         // Push to history
         setHistory(prev => [...prev, {
             index: currentReelIndex,
@@ -199,10 +256,16 @@ export default function MarkAttendancePage() {
 
         markStudent(studentId, status);
 
-        // Brief delay before scrolling to next
-        setTimeout(() => {
-            nextReel();
-        }, 150);
+        // Check if this was the last student
+        if (currentReelIndex >= students.length - 1) {
+            toast.info("Auto-saving attendance...");
+            handleSave(updatedStudents); // Pass updated data immediately
+        } else {
+            // Brief delay before scrolling to next
+            setTimeout(() => {
+                nextReel();
+            }, 150);
+        }
     };
 
     const undoReelAction = () => {
@@ -315,63 +378,76 @@ export default function MarkAttendancePage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                        <div className="hidden sm:flex flex-col items-end mr-2">
+                        {/* Summary Stats (Hidden on small screens if space needed) */}
+                        <div className="hidden md:flex flex-col items-end mr-2">
                             <div className="text-sm font-semibold text-neutral-900 dark:text-white">
                                 {stats.present} / {stats.total}
                             </div>
                             <div className="text-[10px] text-neutral-400 uppercase tracking-wider font-bold">Present</div>
                         </div>
-                        <Button onClick={handleSave} disabled={saving} size="sm" className={cn("gap-2 rounded-full font-medium transition-all shadow-md active:scale-95", saving && "opacity-80")}>
+
+                        {/* Switch Mode Button (Mobile optimized) */}
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setMode(viewMode === 'list' ? 'swipe' : 'list')}
+                            className="hidden sm:flex text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
+                        >
+                            {viewMode === 'list' ? 'Swipe Mode' : 'List Mode'}
+                        </Button>
+
+                        {/* Mobile Icon Toggle */}
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setMode(viewMode === 'list' ? 'swipe' : 'list')}
+                            className="flex sm:hidden text-neutral-500"
+                        >
+                            {viewMode === 'list' ? <Smartphone size={18} /> : <LayoutList size={18} />}
+                        </Button>
+
+                        <Button onClick={() => handleSave()} disabled={saving} size="sm" className={cn("gap-2 rounded-full font-medium transition-all shadow-md active:scale-95", saving && "opacity-80")}>
                             {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
-                            <span className="hidden sm:inline">{saving ? 'Saving...' : 'Save Attendance'}</span>
+                            <span className="hidden sm:inline">{saving ? 'Saving...' : 'Save'}</span>
                         </Button>
                     </div>
                 </div>
             </header>
 
-            {/* Mode Toggle Checkbox/Switcher */}
-            <div className="max-w-5xl mx-auto px-4 py-4 flex justify-end">
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setMode(viewMode === 'list' ? 'swipe' : 'list')}
-                    className="text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors"
-                >
-                    Switch to {viewMode === 'list' ? 'Swipe Mode' : 'List Mode'}
-                </Button>
-            </div>
 
-            <main className="max-w-5xl mx-auto px-4">
+
+            <main className="max-w-5xl mx-auto px-4 pt-4">
                 {viewMode === 'swipe' ? (
-                    <div className="flex flex-col items-center justify-center min-h-[65vh] gap-8 relative overflow-hidden">
+                    <div className="flex flex-col items-center justify-start sm:justify-center min-h-[calc(100vh-5rem)] relative overflow-hidden touch-none select-none pb-20">
                         {/* Background Decor */}
                         <div className="absolute inset-0 pointer-events-none flex items-center justify-center overflow-hidden">
-                            <div className="w-[500px] h-[500px] bg-gradient-to-tr from-blue-500/10 to-purple-500/10 rounded-full blur-3xl animate-pulse" />
+                            <div className="w-[80vw] h-[80vw] bg-gradient-to-tr from-blue-500/10 to-purple-500/10 rounded-full blur-3xl animate-pulse" />
                         </div>
 
                         {/* Swipe Indicators */}
-                        <div className="absolute top-10 flex flex-col items-center gap-2 pointer-events-none transition-opacity duration-300" style={{ opacity: dragDirection === 'up' ? 1 : 0.2 }}>
-                            <div className="p-2 bg-green-500/10 rounded-full backdrop-blur-md">
-                                <ChevronUp className="text-green-500" size={24} />
+                        <div className="absolute top-[5%] flex flex-col items-center gap-2 pointer-events-none transition-opacity duration-300 z-0" style={{ opacity: dragDirection === 'up' ? 1 : 0.2 }}>
+                            <div className="p-3 bg-green-500/10 rounded-full backdrop-blur-md">
+                                <ChevronUp className="text-green-500" size={32} />
                             </div>
-                            <span className="text-xs font-bold text-green-500 uppercase tracking-widest">Present</span>
+                            <span className="text-sm font-bold text-green-500 uppercase tracking-widest">Present</span>
                         </div>
 
-                        <div className="absolute bottom-24 flex flex-col items-center gap-2 pointer-events-none transition-opacity duration-300" style={{ opacity: dragDirection === 'down' ? 1 : 0.2 }}>
-                            <span className="text-xs font-bold text-red-500 uppercase tracking-widest">Absent</span>
-                            <div className="p-2 bg-red-500/10 rounded-full backdrop-blur-md">
-                                <ChevronDown className="text-red-500" size={24} />
+                        <div className="absolute bottom-[10%] flex flex-col items-center gap-2 pointer-events-none transition-opacity duration-300 z-0" style={{ opacity: dragDirection === 'down' ? 1 : 0.2 }}>
+                            <span className="text-sm font-bold text-red-500 uppercase tracking-widest">Absent</span>
+                            <div className="p-3 bg-red-500/10 rounded-full backdrop-blur-md">
+                                <ChevronDown className="text-red-500" size={32} />
                             </div>
                         </div>
 
-                        <div className="relative w-full max-w-[340px] h-[480px] z-10">
+                        {/* Card Container - Centered */}
+                        <div className="relative w-full max-w-[340px] md:max-w-[380px] h-[60vh] max-h-[550px] min-h-[400px] z-20 flex items-center justify-center mt-4">
                             <AnimatePresence mode="popLayout">
                                 {students.length > 0 && currentReelIndex < students.length ? (
                                     <motion.div
                                         key={students[currentReelIndex].student_id}
                                         drag="y"
                                         dragConstraints={{ top: 0, bottom: 0 }}
-                                        dragElastic={0.6}
+                                        dragElastic={0.7}
                                         onDrag={handleDrag}
                                         onDragEnd={handleDragEnd}
                                         initial={{ opacity: 0, scale: 0.9, y: 50 }}
@@ -384,30 +460,30 @@ export default function MarkAttendancePage() {
                                         exit={{
                                             opacity: 0,
                                             scale: 0.95,
-                                            y: dragDirection === 'up' ? -200 : 200,
+                                            y: dragDirection === 'up' ? -300 : 300,
                                             transition: { duration: 0.2 }
                                         }}
                                         className={cn(
-                                            "absolute inset-0 cursor-grab active:cursor-grabbing rounded-[2rem] shadow-2xl flex flex-col overflow-hidden bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800",
-                                            dragDirection === 'up' && "ring-4 ring-green-500/30 border-green-500 transition-all",
-                                            dragDirection === 'down' && "ring-4 ring-red-500/30 border-red-500 transition-all"
+                                            "absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing rounded-[2rem] shadow-2xl flex flex-col overflow-hidden bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 touch-pan-y",
+                                            dragDirection === 'up' && "ring-4 ring-green-500/30 border-green-500 transition-all shadow-green-500/20",
+                                            dragDirection === 'down' && "ring-4 ring-red-500/30 border-red-500 transition-all shadow-red-500/20"
                                         )}
                                     >
                                         {/* Card Header / Banner */}
-                                        <div className="h-32 bg-gradient-to-br from-neutral-100 to-neutral-200 dark:from-neutral-800 dark:to-neutral-900 relative">
-                                            <div className="absolute top-4 right-4 bg-white/90 dark:bg-black/80 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold shadow-sm border border-neutral-100 dark:border-neutral-800">
-                                                #{currentReelIndex + 1}
+                                        <div className="h-[140px] min-h-[140px] bg-gradient-to-br from-neutral-100 to-neutral-200 dark:from-neutral-800 dark:to-neutral-900 relative">
+                                            <div className="absolute top-4 right-4 bg-white/90 dark:bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-full text-xs font-bold shadow-sm border border-neutral-100 dark:border-neutral-800">
+                                                {currentReelIndex + 1} / {students.length}
                                             </div>
                                         </div>
 
                                         {/* Avatar & Content */}
-                                        <div className="flex-1 flex flex-col items-center -mt-16 px-6 pb-8">
-                                            <div className="relative mb-4 group">
+                                        <div className="flex-1 flex flex-col items-center px-6 pb-6 -mt-[60px]">
+                                            <div className="relative mb-4 group shrink-0">
                                                 {/* Progress Ring for Attendance */}
                                                 <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-blue-500 border-r-blue-500 rotate-45 group-hover:rotate-180 transition-transform duration-700 opacity-80"></div>
 
                                                 <div className={cn(
-                                                    "w-28 h-28 rounded-full flex items-center justify-center text-4xl font-bold shadow-lg border-4 border-white dark:border-neutral-900 relative z-10",
+                                                    "w-28 h-28 rounded-full flex items-center justify-center text-3xl font-bold shadow-lg border-4 border-white dark:border-neutral-900 relative z-10",
                                                     students[currentReelIndex].status === 'present' ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" :
                                                         students[currentReelIndex].status === 'absent' ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" :
                                                             "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
@@ -417,7 +493,7 @@ export default function MarkAttendancePage() {
 
                                                 {/* Percentage Badge */}
                                                 <div className={cn(
-                                                    "absolute -bottom-2 -right-2 px-2 py-1 rounded-lg text-xs font-bold shadow-sm border border-white dark:border-neutral-800 z-20 flex items-center gap-1",
+                                                    "absolute -bottom-2 -right-2 px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm border border-white dark:border-neutral-800 z-20 flex items-center gap-1",
                                                     (students[currentReelIndex].attendance_percentage || 0) < 75 ? "bg-red-50 text-red-600 dark:bg-red-900/50 dark:text-red-200" : "bg-green-50 text-green-600 dark:bg-green-900/50 dark:text-green-200"
 
                                                 )}>
@@ -425,21 +501,23 @@ export default function MarkAttendancePage() {
                                                 </div>
                                             </div>
 
-                                            <h2 className="text-2xl font-bold text-neutral-900 dark:text-white text-center mb-1 line-clamp-1">
-                                                {students[currentReelIndex].name}
-                                            </h2>
-                                            <p className="text-neutral-500 font-medium mb-8 text-sm bg-neutral-100 dark:bg-neutral-800 px-3 py-1 rounded-full">
-                                                Roll: {students[currentReelIndex].roll_number}
-                                            </p>
+                                            <div className="flex-1 w-full flex flex-col items-center justify-center space-y-2 min-h-0">
+                                                <h2 className="text-2xl sm:text-3xl font-bold text-neutral-900 dark:text-white text-center leading-tight line-clamp-2">
+                                                    {students[currentReelIndex].name}
+                                                </h2>
+                                                <p className="text-neutral-500 font-medium text-sm bg-neutral-100 dark:bg-neutral-800 px-4 py-1.5 rounded-full shrink-0">
+                                                    Roll No: {students[currentReelIndex].roll_number}
+                                                </p>
+                                            </div>
 
-                                            <div className="grid grid-cols-2 gap-4 w-full mt-auto">
-                                                <div className="text-center p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-800/50">
-                                                    <div className="text-xs text-neutral-400 uppercase tracking-wider font-bold mb-1">Total</div>
-                                                    <div className="text-lg font-bold text-neutral-900 dark:text-white">{students[currentReelIndex].total_lectures || 0}</div>
+                                            <div className="grid grid-cols-2 gap-3 w-full mt-4 shrink-0">
+                                                <div className="flex flex-col items-center justify-center p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-100 dark:border-neutral-800">
+                                                    <div className="text-[10px] text-neutral-400 uppercase tracking-wider font-bold mb-0.5">Total</div>
+                                                    <div className="text-xl font-bold text-neutral-900 dark:text-white leading-none">{students[currentReelIndex].total_lectures || 0}</div>
                                                 </div>
-                                                <div className="text-center p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-800/50">
-                                                    <div className="text-xs text-neutral-400 uppercase tracking-wider font-bold mb-1">Present</div>
-                                                    <div className="text-lg font-bold text-neutral-900 dark:text-white">{students[currentReelIndex].present_lectures || 0}</div>
+                                                <div className="flex flex-col items-center justify-center p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-100 dark:border-neutral-800">
+                                                    <div className="text-[10px] text-neutral-400 uppercase tracking-wider font-bold mb-0.5">Present</div>
+                                                    <div className="text-xl font-bold text-neutral-900 dark:text-white leading-none">{students[currentReelIndex].present_lectures || 0}</div>
                                                 </div>
                                             </div>
                                         </div>
@@ -448,42 +526,61 @@ export default function MarkAttendancePage() {
                                     <motion.div
                                         initial={{ opacity: 0, scale: 0.9 }}
                                         animate={{ opacity: 1, scale: 1 }}
-                                        className="absolute inset-0 flex flex-col items-center justify-center text-center p-8 bg-white dark:bg-neutral-900 rounded-[2rem] shadow-xl border border-neutral-200 dark:border-neutral-800"
+                                        className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-white dark:bg-neutral-900 rounded-[2rem] shadow-xl border border-neutral-200 dark:border-neutral-800"
                                     >
-                                        <div className="w-24 h-24 bg-green-50 dark:bg-green-900/20 rounded-full flex items-center justify-center mb-6 text-green-500 animate-bounce-slow">
+                                        <div className="w-20 h-20 bg-green-50 dark:bg-green-900/20 rounded-full flex items-center justify-center mb-4 text-green-500 animate-bounce-slow">
                                             <CheckCircle size={48} strokeWidth={1.5} />
                                         </div>
-                                        <h3 className="text-2xl font-bold text-neutral-900 dark:text-white mb-2">All Done!</h3>
-                                        <p className="text-neutral-500 mb-8 max-w-[200px] text-sm">You have marked attendance for all students in this session.</p>
-                                        <Button onClick={() => router.push('/teacher/attendance')} variant="outline" className="rounded-full">
-                                            Back into Dashboard
-                                        </Button>
+                                        <h3 className="text-2xl font-bold text-neutral-900 dark:text-white mb-1">Session Compete!</h3>
+                                        <p className="text-neutral-500 mb-6 text-sm">Here is the summary for today.</p>
+
+                                        {/* Summary Stats */}
+                                        <div className="grid grid-cols-2 gap-3 w-full mb-6 max-w-[280px]">
+                                            <div className="flex flex-col items-center p-3 bg-green-50 dark:bg-green-900/10 rounded-2xl border border-green-100 dark:border-green-900/30">
+                                                <span className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.present}</span>
+                                                <span className="text-xs font-semibold text-green-600/70 dark:text-green-400/70 uppercase">Present</span>
+                                            </div>
+                                            <div className="flex flex-col items-center p-3 bg-red-50 dark:bg-red-900/10 rounded-2xl border border-red-100 dark:border-red-900/30">
+                                                <span className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.absent}</span>
+                                                <span className="text-xs font-semibold text-red-600/70 dark:text-red-400/70 uppercase">Absent</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex flex-col gap-3 w-full max-w-[280px]">
+                                            <Button onClick={() => handleSave()} disabled={saving} className="w-full rounded-xl h-12 text-base font-semibold shadow-md gap-2 bg-neutral-900 hover:bg-neutral-800 text-white dark:bg-white dark:text-black">
+                                                {saving ? <Loader2 className="animate-spin" /> : <Save size={18} />}
+                                                {saving ? 'Saving...' : 'Save Attendance'}
+                                            </Button>
+                                            <Button onClick={() => router.push('/teacher/attendance')} variant="ghost" className="w-full rounded-xl h-10 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100">
+                                                Back to Dashboard
+                                            </Button>
+                                        </div>
                                     </motion.div>
                                 )}
                             </AnimatePresence>
                         </div>
 
-                        {/* Progress Bar */}
-                        <div className="w-full max-w-[300px] h-1.5 bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden">
+                        {/* Progress Bar - Moved to top to avoid overlap with cards */}
+                        <div className="absolute top-[8%] left-8 right-8 h-1.5 bg-neutral-200/50 dark:bg-neutral-800/50 rounded-full overflow-hidden backdrop-blur-sm z-10 pointer-events-none">
                             <motion.div
-                                className="h-full bg-neutral-900 dark:bg-white rounded-full"
+                                className="h-full bg-neutral-900 dark:bg-white rounded-full shadow-[0_0_10px_rgba(0,0,0,0.2)] dark:shadow-[0_0_10px_rgba(255,255,255,0.2)]"
                                 animate={{ width: `${Math.min(((currentReelIndex) / students.length) * 100, 100)}%` }}
                             />
                         </div>
 
-                        {/* Controls */}
-                        <div className="w-full max-w-[340px] grid grid-cols-4 gap-4 px-2">
+                        {/* Controls - Bottom fixed */}
+                        <div className="absolute bottom-6 w-full max-w-[340px] grid grid-cols-4 gap-4 px-4 z-30">
                             <Button
                                 variant="outline"
-                                className="h-14 w-14 rounded-full border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 p-0 flex items-center justify-center"
+                                className="h-14 w-14 rounded-full border-neutral-200 dark:border-neutral-800 bg-white/90 dark:bg-neutral-900/90 backdrop-blur-md hover:bg-neutral-100 dark:hover:bg-neutral-800 p-0 flex items-center justify-center shadow-lg"
                                 onClick={undoReelAction}
-                                disabled={history.length === 0}
+                                disabled={history.length === 0 || (students.length > 0 && currentReelIndex >= students.length)}
                             >
                                 <RotateCcw size={20} className="text-neutral-500" />
                             </Button>
 
                             <Button
-                                className="col-span-1 h-14 w-14 rounded-full bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:hover:bg-red-900/40 border-0 p-0 flex items-center justify-center"
+                                className="col-span-1 h-14 w-14 rounded-full bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:hover:bg-red-900/40 border-0 p-0 flex items-center justify-center shadow-lg shadow-red-500/10"
                                 onClick={() => markInReel(students[currentReelIndex].student_id, 'absent')}
                                 disabled={currentReelIndex >= students.length}
                             >
@@ -491,12 +588,12 @@ export default function MarkAttendancePage() {
                             </Button>
 
                             <Button
-                                className="col-span-2 h-14 rounded-full bg-neutral-900 hover:bg-neutral-800 text-white dark:bg-white dark:text-black dark:hover:bg-neutral-200 shadow-lg p-0 flex items-center justify-center gap-2"
+                                className="col-span-2 h-14 rounded-full bg-neutral-900 hover:bg-neutral-800 text-white dark:bg-white dark:text-black dark:hover:bg-neutral-200 shadow-xl shadow-neutral-900/20 dark:shadow-white/10 p-0 flex items-center justify-center gap-2"
                                 onClick={() => markInReel(students[currentReelIndex].student_id, 'present')}
                                 disabled={currentReelIndex >= students.length}
                             >
                                 <Check size={24} />
-                                <span className="font-semibold">Present</span>
+                                <span className="font-semibold text-lg">Present</span>
                             </Button>
                         </div>
                     </div>

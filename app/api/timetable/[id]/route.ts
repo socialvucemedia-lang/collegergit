@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { getAuthorizedUser } from '@/lib/api-auth';
 
 export async function DELETE(
     request: NextRequest,
@@ -7,9 +7,15 @@ export async function DELETE(
 ) {
     try {
         const { id } = await params;
-        const supabase = await createServerClient();
+        const auth = await getAuthorizedUser();
+        if (auth.error) return auth.error;
 
-        const { error } = await supabase
+        if (!auth.isAdmin && !auth.isAdvisor) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
+        const { supabaseAdmin } = auth;
+        const { error } = await supabaseAdmin
             .from('timetable_slots')
             .delete()
             .eq('id', id);
@@ -31,7 +37,14 @@ export async function PATCH(
 ) {
     try {
         const { id } = await params;
-        const supabase = await createServerClient();
+        const auth = await getAuthorizedUser();
+        if (auth.error) return auth.error;
+
+        if (!auth.isAdmin && !auth.isAdvisor) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
+        const { supabaseAdmin } = auth;
         const body = await request.json();
         const { day_of_week, start_time, end_time, room } = body;
 
@@ -41,7 +54,7 @@ export async function PATCH(
         if (end_time !== undefined) updateData.end_time = end_time;
         if (room !== undefined) updateData.room = room;
 
-        const { data, error } = await supabase
+        const { data, error } = await supabaseAdmin
             .from('timetable_slots')
             .update(updateData)
             .eq('id', id)

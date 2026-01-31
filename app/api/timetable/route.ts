@@ -96,8 +96,28 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Optimized: Check for all conflicts in a single query
-        const { data: existingSlots, error: conflictError } = await supabaseAdmin
+        // Optimized: Check for conflicts using a dynamic OR query
+        const orConditions: string[] = [];
+
+        // 1. Check teacher conflict (only if teacher is assigned)
+        if (teacher_id) {
+            orConditions.push(`teacher_id.eq.${teacher_id}`);
+        }
+
+        // 2. Check room conflict (only if room is assigned)
+        if (room) {
+            orConditions.push(`room.eq.${room}`);
+        }
+
+        // 3. Check section conflict (Class cannot have 2 subjects at same time)
+        // This is always checked if we have section and semester
+        if (section && semester) {
+            orConditions.push(`and(section.eq.${section},semester.eq.${semester})`);
+        }
+
+        // If no conditions to check (unlikely), we might skip OR
+        // But we likely always have section+semester.
+        let conflictQuery = supabaseAdmin
             .from('timetable_slots')
             .select(`
                 id, 
@@ -110,8 +130,13 @@ export async function POST(request: NextRequest) {
             `)
             .eq('day_of_week', day_of_week)
             .lte('start_time', end_time)
-            .gte('end_time', start_time)
-            .or(`teacher_id.eq.${teacher_id || 'null'},room.eq.${room || 'null'},and(section.eq.${section || 'null'},semester.eq.${semester || 'null'})`);
+            .gte('end_time', start_time);
+
+        if (orConditions.length > 0) {
+            conflictQuery = conflictQuery.or(orConditions.join(','));
+        }
+
+        const { data: existingSlots, error: conflictError } = await conflictQuery;
 
         if (conflictError) {
             console.error('Conflict check error:', conflictError);
@@ -126,7 +151,7 @@ export async function POST(request: NextRequest) {
                     conflicts.push(`${name} is already teaching ${slot.subjects?.code} in Section ${slot.section} at this time`);
                 } else if (room && slot.room === room) {
                     conflicts.push(`Room ${room} is already booked for ${slot.subjects?.code} (Section ${slot.section}) at this time`);
-                } else if (section && slot.section === section && slot.semester == semester) {
+                } else if (section && semester && slot.section === section && slot.semester == semester) {
                     conflicts.push(`This time slot already has ${slot.subjects?.code} scheduled for Section ${section}`);
                 }
             }
