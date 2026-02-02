@@ -107,7 +107,7 @@ export default function MarkAttendancePage() {
             if (authError || !data.session) {
                 console.error("Auth error:", authError);
                 toast.error("Session expired. Please login again.");
-                router.push("/login?redirect=" + encodeURIComponent(window.location.pathname));
+                router.replace("/login?redirect=" + encodeURIComponent(window.location.pathname));
                 return;
             }
 
@@ -119,7 +119,7 @@ export default function MarkAttendancePage() {
             if (!response.ok) {
                 if (response.status === 401) {
                     toast.error("Unauthorized. Please login again.");
-                    router.push("/login");
+                    router.replace("/login?redirect=" + encodeURIComponent(window.location.pathname));
                     return;
                 }
                 throw new Error("Failed to load data");
@@ -132,7 +132,7 @@ export default function MarkAttendancePage() {
             console.error(error);
             if (error.message?.includes("Refresh Token")) {
                 toast.error("Session expired. Please login again.");
-                router.push("/login");
+                router.replace("/login?redirect=" + encodeURIComponent(window.location.pathname));
             } else {
                 toast.error("Failed to load attendance session");
             }
@@ -647,19 +647,21 @@ export default function MarkAttendancePage() {
                                                         "bg-transparent"
                                         )} />
 
-                                        <div className="flex items-start justify-between mb-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className={cn(
-                                                    "w-12 h-12 rounded-full flex items-center justify-center font-bold text-sm shadow-sm border-2 border-white dark:border-neutral-800",
-                                                    student.status === 'present' ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300" :
-                                                        student.status === 'absent' ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300" :
-                                                            "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"
-                                                )}>
-                                                    {student.roll_number.slice(-3)}
+                                        <div className="flex items-start justify-between mb-4 gap-2">
+                                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                <div className="w-12 h-12 flex-shrink-0">
+                                                    <div className={cn(
+                                                        "w-full h-full rounded-full flex items-center justify-center font-bold text-sm shadow-sm border-2 border-white dark:border-neutral-800",
+                                                        student.status === 'present' ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300" :
+                                                            student.status === 'absent' ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300" :
+                                                                "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"
+                                                    )}>
+                                                        {student.roll_number.slice(-3)}
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <h3 className="font-semibold text-neutral-900 dark:text-neutral-100 text-base">{student.name}</h3>
-                                                    <p className="text-xs text-neutral-500 font-medium">{student.roll_number}</p>
+                                                <div className="min-w-0 flex-1">
+                                                    <h3 className="font-semibold text-neutral-900 dark:text-neutral-100 text-base truncate">{student.name}</h3>
+                                                    <p className="text-xs text-neutral-500 font-medium truncate">{student.roll_number}</p>
                                                 </div>
                                             </div>
 
@@ -674,7 +676,7 @@ export default function MarkAttendancePage() {
                                             </div>
                                         </div>
 
-                                        <div className="grid grid-cols-3 gap-2 mt-auto">
+                                        <div className="grid grid-cols-2 gap-2 mt-auto">
                                             <StatusButton
                                                 active={student.status === 'present'}
                                                 onClick={() => markStudent(student.student_id, 'present')}
@@ -689,13 +691,13 @@ export default function MarkAttendancePage() {
                                                 icon={X}
                                                 label="Absent"
                                             />
-                                            <StatusButton
+                                            {/* <StatusButton
                                                 active={student.status === 'late'}
                                                 onClick={() => markStudent(student.student_id, 'late')}
                                                 color="orange"
                                                 icon={Clock}
                                                 label="Late"
-                                            />
+                                            /> */}
                                         </div>
                                     </motion.div>
                                 ))}

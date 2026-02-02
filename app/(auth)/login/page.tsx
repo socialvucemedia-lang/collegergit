@@ -2,7 +2,7 @@
 
 
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, ShieldCheck, GraduationCap, Users, AlertCircle } from 'lucide-react';
 import { Card } from '@/components/ui/card';
@@ -30,11 +30,15 @@ export default function LoginPage() {
     const [error, setError] = useState<string | null>(null);
     const router = useRouter();
     const { user, refreshUser } = useAuth();
+    // Prevent redirect during login validation to avoid race conditions
+    const loginInProgress = useRef(false);
 
-    // Redirect if already authenticated
+    // Redirect if already authenticated (but not during login validation)
     useEffect(() => {
-        if (user) {
-            router.push(`/${user.role}`);
+        if (user && !loginInProgress.current) {
+            const searchParams = new URLSearchParams(window.location.search);
+            const redirectTo = searchParams.get('redirect');
+            router.replace(redirectTo || `/${user.role}`);
         }
     }, [user, router]);
 
@@ -44,6 +48,7 @@ export default function LoginPage() {
 
         setError(null);
         setIsLoading(true);
+        loginInProgress.current = true;
 
         try {
             // Sign in with Supabase Auth
@@ -53,11 +58,7 @@ export default function LoginPage() {
                 throw new Error('Authentication failed');
             }
 
-            // Wait a bit for auth state to propagate, then refresh user profile
-            await new Promise(resolve => setTimeout(resolve, 200));
-            await refreshUser();
-
-            // Get user profile via API (bypasses RLS)
+            // Get user profile via API (bypasses RLS) - single API call
             const profileRes = await fetch('/api/auth/profile');
             const profileData = await profileRes.json();
 
@@ -88,9 +89,17 @@ export default function LoginPage() {
 
             toast.success('Logged in successfully');
 
-            // Redirect to dashboard
-            router.push(`/${selectedRole}`);
+            // Update auth context with the profile
+            await refreshUser();
+
+            // Allow redirect now and navigate
+            loginInProgress.current = false;
+
+            const searchParams = new URLSearchParams(window.location.search);
+            const redirectTo = searchParams.get('redirect');
+            router.replace(redirectTo || `/${selectedRole}`);
         } catch (err: any) {
+            loginInProgress.current = false;
             const errorMessage = err.message || 'Login failed. Please check your credentials.';
             setError(errorMessage);
             toast.error(errorMessage);

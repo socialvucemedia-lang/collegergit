@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { getCurrentUser, signOut } from '@/lib/auth';
@@ -16,25 +16,31 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [state, setState] = useState<{
+    user: AuthUser | null;
+    loading: boolean;
+  }>({
+    user: null,
+    loading: true,
+  });
   const router = useRouter();
+  const initialized = useRef(false);
 
   const refreshUser = async () => {
     try {
       const currentUser = await getCurrentUser();
-      setUser(currentUser);
+      setState({ user: currentUser, loading: false });
     } catch (error) {
       console.error('Error refreshing user:', error);
-      setUser(null);
+      setState({ user: null, loading: false });
     }
   };
 
   const handleSignOut = async () => {
     try {
       await signOut();
-      setUser(null);
-      router.push('/login');
+      setState({ user: null, loading: false });
+      router.replace('/login');
     } catch (error) {
       console.error('Error signing out:', error);
     }
@@ -44,14 +50,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let mounted = true;
 
     const initAuth = async () => {
-      try {
-        const currentUser = await getCurrentUser();
-        if (mounted) setUser(currentUser);
-      } catch (error) {
-        console.error('Error refreshing user:', error);
-      } finally {
-        if (mounted) setLoading(false);
-      }
+      if (initialized.current) return;
+      initialized.current = true;
+      await refreshUser();
     };
 
     initAuth();
@@ -61,16 +62,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
 
+      // Handle events
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        // If we don't have a user or it's a refresh, update
         const currentUser = await getCurrentUser();
         if (mounted) {
-          setUser(currentUser);
-          setLoading(false);
+          setState({ user: currentUser, loading: false });
         }
       } else if (event === 'SIGNED_OUT') {
         if (mounted) {
-          setUser(null);
-          setLoading(false);
+          setState({ user: null, loading: false });
         }
       }
     });
@@ -81,9 +82,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+
   const contextValue = {
-    user,
-    loading,
+    user: state.user,
+    loading: state.loading,
     signOut: handleSignOut,
     refreshUser,
   };

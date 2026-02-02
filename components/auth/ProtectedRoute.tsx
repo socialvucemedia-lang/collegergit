@@ -20,13 +20,13 @@ export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) 
 
     // If not authenticated, redirect to login
     if (!user) {
-      router.push('/login');
+      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
       return;
     }
 
     // If role is required and doesn't match, redirect to their dashboard
     if (requiredRole && user.role !== requiredRole) {
-      router.push(`/${user.role}`);
+      router.replace(`/${user.role}`);
       return;
     }
   }, [user, loading, requiredRole, router, pathname]);
