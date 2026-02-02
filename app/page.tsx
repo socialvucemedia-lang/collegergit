@@ -1,5 +1,18 @@
 import { redirect } from 'next/navigation';
+import { createServerClient } from '@/lib/supabase-server';
 
-export default function Home() {
+export const dynamic = 'force-dynamic';
+
+export default async function Home() {
+  const supabase = await createServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (user) {
+    const role = user.user_metadata?.role;
+    if (role) {
+      redirect(`/${role}`);
+    }
+  }
+
   redirect('/login');
 }

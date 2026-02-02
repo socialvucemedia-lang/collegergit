@@ -86,6 +86,8 @@ export async function GET(
         if (session.section) studentQuery = studentQuery.eq('section', session.section);
         if (session.batch) studentQuery = studentQuery.eq('batch', session.batch);
 
+        studentQuery = studentQuery.order('roll_number', { ascending: true });
+
         // OPTIMIZATION: Run student fetch, existing records, and total lectures count in parallel
         const [studentsResult, recordsResult, totalLecturesResult] = await Promise.all([
             studentQuery,
@@ -103,29 +105,57 @@ export async function GET(
         let students = studentsResult.data || [];
         const studentsError = studentsResult.error;
 
-        // Fallback strategies if no students found
-        if (students.length === 0 && !studentsError) {
-            // Strategy 2: Dept + Sem only
+        // Fallback strategies if very few students found (handling data mismatches)
+        // We use a threshold of 5 to catch cases where only a few "sample" students match
+        if (students.length < 5 && !studentsError) {
+            console.log(`Only ${students.length} students found with strict filters. Trying broader strategies...`);
+
+            // Strategy 2: Dept + Sem + Section (Ignore Batch)
             let query2 = supabase
                 .from('students')
                 .select(`id, roll_number, section, batch, semester, department_id, users (full_name, email)`);
 
             if (subject.department_id) query2 = query2.eq('department_id', subject.department_id);
             if (subject.semester) query2 = query2.eq('semester', subject.semester);
+            if (session.section) query2 = query2.eq('section', session.section);
+
+            query2 = query2.order('roll_number', { ascending: true });
 
             const { data: data2 } = await query2;
-
-            if (data2 && data2.length > 0) {
+            if (data2 && data2.length > students.length) {
+                console.log(`Strategy 2 (ignore batch) found ${data2.length} students.`);
                 students = data2;
-            } else if (subject.department_id) {
-                // Strategy 3: Dept only
-                const { data: data3 } = await supabase
+            }
+
+            // Strategy 3: Dept + Section (Ignore Semester - very common mismatch)
+            if (students.length < 5) {
+                let query3 = supabase
+                    .from('students')
+                    .select(`id, roll_number, section, batch, semester, department_id, users (full_name, email)`);
+
+                if (subject.department_id) query3 = query3.eq('department_id', subject.department_id);
+                if (session.section) query3 = query3.eq('section', session.section);
+
+                query3 = query3.order('roll_number', { ascending: true });
+
+                const { data: data3 } = await query3;
+                if (data3 && data3.length > students.length) {
+                    console.log(`Strategy 3 (ignore semester) found ${data3.length} students.`);
+                    students = data3;
+                }
+            }
+
+            // Strategy 4: Dept Only (Last resort)
+            if (students.length < 5 && subject.department_id) {
+                const { data: data4 } = await supabase
                     .from('students')
                     .select(`id, roll_number, section, batch, semester, department_id, users (full_name, email)`)
-                    .eq('department_id', subject.department_id);
+                    .eq('department_id', subject.department_id)
+                    .order('roll_number', { ascending: true });
 
-                if (data3 && data3.length > 0) {
-                    students = data3;
+                if (data4 && data4.length > students.length) {
+                    console.log(`Strategy 4 (department only) found ${data4.length} students.`);
+                    students = data4;
                 }
             }
         }
