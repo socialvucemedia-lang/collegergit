@@ -1,288 +1,135 @@
-"use client";
+import { createServerClient } from '@/lib/supabase-server';
+import { verifyServerAuth } from '@/lib/server-auth';
+import { StudentDashboardClient } from '@/components/student/StudentDashboardClient';
 
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Loader2, Calendar, Clock, MapPin, CheckCircle, XCircle, Clock3 } from "lucide-react";
-import Link from "next/link";
-import { supabase } from "@/lib/supabase";
+async function getStudentData(userId: string) {
+    const supabase = await createServerClient();
 
-type ViewType = "today" | "timetable" | "profile";
+    // Get student profile
+    const { data: student } = await supabase
+        .from('students')
+        .select('id, semester, division, batch')
+        .eq('user_id', userId)
+        .single();
 
-export default function StudentDashboard() {
-    const [activeView, setActiveView] = useState<ViewType>("today");
+    if (!student) {
+        return { timeline: [], dayInfo: null, attendance: null };
+    }
 
-    const VIEWS: { id: ViewType; label: string }[] = [
-        { id: "today", label: "Today" },
-        { id: "timetable", label: "Timetable" },
-        { id: "profile", label: "Profile" },
-    ];
+    // Get today's timeline
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const today = new Date();
+    const dayName = days[today.getDay()];
+    const now = new Date();
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:00`;
 
-    return (
-        <div className="space-y-6">
-            {/* Instagram-style Selector Bar - Horizontal Scrollable if needed, but here fixed width */}
-            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-2 border-b border-neutral-100 dark:border-neutral-800">
-                {VIEWS.map((view) => {
-                    const isActive = view.id === activeView;
-                    return (
-                        <button
-                            key={view.id}
-                            onClick={() => setActiveView(view.id)}
-                            className={`relative px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap ${isActive ? "text-neutral-900 dark:text-white" : "text-neutral-400 dark:text-neutral-500"
-                                }`}
-                        >
-                            {view.label}
-                            {isActive && (
-                                <motion.div
-                                    layoutId="activeTab"
-                                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-neutral-900 dark:bg-white rounded-full"
-                                />
-                            )}
-                        </button>
-                    );
-                })}
-            </div>
+    // Fetch timetable for today
+    const { data: timetable } = await supabase
+        .from('timetable_entries')
+        .select(`
+            id,
+            start_time,
+            end_time,
+            room,
+            allocations!inner(
+                id,
+                division,
+                semester,
+                subjects(id, code, name),
+                users(full_name)
+            )
+        `)
+        .eq('day_of_week', dayName)
+        .eq('allocations.semester', student.semester)
+        .eq('allocations.division', student.division)
+        .order('start_time');
 
-            <AnimatePresence mode="wait">
-                <motion.div
-                    key={activeView}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.98 }}
-                    transition={{ duration: 0.2 }}
-                >
-                    {activeView === "today" && <TodayView />}
-                    {activeView === "timetable" && <TimetableView />}
-                    {activeView === "profile" && <ProfileView />}
-                </motion.div>
-            </AnimatePresence>
-        </div>
-    );
-}
+    // Transform to timeline format with status
+    const timeline = (timetable || []).map((entry: any) => {
+        let status: 'completed' | 'current' | 'upcoming' = 'upcoming';
+        if (entry.end_time <= currentTime) status = 'completed';
+        else if (entry.start_time <= currentTime && entry.end_time > currentTime) status = 'current';
 
-function TodayView() {
-    const [loading, setLoading] = useState(true);
-    const [timeline, setTimeline] = useState<any[]>([]);
-    const [dayInfo, setDayInfo] = useState<{ date: string; day_name: string } | null>(null);
+        return {
+            id: entry.id,
+            subject_code: entry.allocations?.subjects?.code || '',
+            subject_name: entry.allocations?.subjects?.name || '',
+            start_time: entry.start_time,
+            end_time: entry.end_time,
+            room: entry.room || '',
+            teacher_name: entry.allocations?.users?.full_name || '',
+            status,
+            attendance_status: null, // Would need to fetch from attendance_records
+        };
+    });
 
-    useEffect(() => {
-        fetchTimeline();
-    }, []);
+    // Fetch attendance summary
+    const { data: attendanceRecords } = await supabase
+        .from('attendance_records')
+        .select(`
+            status,
+            attendance_sessions!inner(
+                subject_id,
+                subjects(id, code, name)
+            )
+        `)
+        .eq('student_id', student.id);
 
-    const fetchTimeline = async () => {
-        try {
-            const { data: { session } } = await supabase.auth.getSession();
-            const response = await fetch('/api/student/timeline', {
-                headers: {
-                    Authorization: `Bearer ${session?.access_token}`,
-                },
-            });
-            if (response.ok) {
-                const data = await response.json();
-                setTimeline(data.timeline || []);
-                setDayInfo({ date: data.date, day_name: data.day_name });
+    // Calculate attendance stats
+    let attendance = null;
+    if (attendanceRecords && attendanceRecords.length > 0) {
+        const subjectMap = new Map<string, { total: number; present: number; subject: any }>();
+
+        for (const record of attendanceRecords) {
+            const subject = (record.attendance_sessions as any)?.subjects;
+            if (!subject) continue;
+
+            const existing = subjectMap.get(subject.id) || { total: 0, present: 0, subject };
+            existing.total++;
+            if (record.status === 'present' || record.status === 'late') {
+                existing.present++;
             }
-        } catch (error) {
-            console.error('Error fetching timeline:', error);
-        } finally {
-            setLoading(false);
+            subjectMap.set(subject.id, existing);
         }
-    };
 
-    const getStatusInfo = (attendanceStatus: string, slotStatus: string) => {
-        if (slotStatus === 'completed') {
-            if (attendanceStatus === 'present') return { color: 'bg-green-500', text: 'Present', textColor: 'text-green-600 dark:text-green-400' };
-            if (attendanceStatus === 'late') return { color: 'bg-yellow-500', text: 'Late', textColor: 'text-yellow-600 dark:text-yellow-400' };
-            if (attendanceStatus === 'absent') return { color: 'bg-red-500', text: 'Absent', textColor: 'text-red-600 dark:text-red-400' };
-            return { color: 'bg-neutral-400', text: 'Pending', textColor: 'text-neutral-400' };
-        }
-        if (slotStatus === 'current') return { color: 'bg-blue-500', text: 'Ongoing', textColor: 'text-blue-600 dark:text-blue-400' };
-        return { color: 'bg-neutral-300 dark:bg-neutral-700', text: 'Upcoming', textColor: 'text-neutral-400' };
-    };
+        const subjects = Array.from(subjectMap.entries()).map(([id, data]) => ({
+            subject_id: id,
+            subject_code: data.subject.code,
+            subject_name: data.subject.name,
+            total: data.total,
+            present: data.present,
+            percentage: data.total > 0 ? Math.round((data.present / data.total) * 100) : 0,
+        }));
 
-    const formatTime = (time: string) => {
-        const [hours, minutes] = time.split(':');
-        const h = parseInt(hours);
-        const ampm = h >= 12 ? 'PM' : 'AM';
-        const h12 = h % 12 || 12;
-        return `${h12}:${minutes} ${ampm}`;
-    };
+        const totalClasses = subjects.reduce((sum, s) => sum + s.total, 0);
+        const totalAttended = subjects.reduce((sum, s) => sum + s.present, 0);
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center py-20">
-                <Loader2 className="animate-spin text-neutral-400" size={32} />
-            </div>
-        );
+        attendance = {
+            overall: {
+                total_classes: totalClasses,
+                attended: totalAttended,
+                percentage: totalClasses > 0 ? Math.round((totalAttended / totalClasses) * 100) : 0,
+            },
+            subjects,
+        };
     }
 
-    return (
-        <div className="space-y-4">
-            <div className="flex items-center justify-between">
-                <h2 className="text-sm font-medium text-neutral-500 uppercase tracking-wider">Timeline</h2>
-                {dayInfo && (
-                    <span className="text-xs font-bold bg-neutral-100 dark:bg-neutral-800 px-2 py-1 rounded">
-                        {dayInfo.day_name}, {new Date(dayInfo.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
-                    </span>
-                )}
-            </div>
-
-            {timeline.length === 0 ? (
-                <Card className="p-8 text-center">
-                    <Calendar className="mx-auto mb-3 text-neutral-400" size={40} />
-                    <p className="text-neutral-500">No classes scheduled for today</p>
-                </Card>
-            ) : (
-                <div className="relative pl-4 space-y-6 border-l border-neutral-200 dark:border-neutral-800 ml-2">
-                    {timeline.map((item, idx) => {
-                        const statusInfo = getStatusInfo(item.attendance_status, item.status);
-                        return (
-                            <div key={item.id || idx} className="relative">
-                                <div className={`absolute -left-[21px] top-1.5 h-3 w-3 rounded-full border-2 border-white dark:border-black ${statusInfo.color}`} />
-                                <div className="bg-white dark:bg-neutral-900 p-4 rounded-xl border border-neutral-100 dark:border-neutral-800 shadow-sm">
-                                    <div className="flex justify-between items-start mb-2">
-                                        <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">
-                                            {item.subject_code} - {item.subject_name}
-                                        </h3>
-                                        <span className={`text-xs font-bold ${statusInfo.textColor}`}>{statusInfo.text}</span>
-                                    </div>
-                                    <div className="flex items-center gap-4 text-sm text-neutral-500">
-                                        <span className="flex items-center gap-1">
-                                            <Clock size={14} />
-                                            {formatTime(item.start_time)} - {formatTime(item.end_time)}
-                                        </span>
-                                        {item.room && (
-                                            <span className="flex items-center gap-1">
-                                                <MapPin size={14} />
-                                                {item.room}
-                                            </span>
-                                        )}
-                                    </div>
-                                    {item.teacher_name && (
-                                        <p className="text-xs text-neutral-400 mt-2">{item.teacher_name}</p>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
-        </div>
-    );
+    return {
+        timeline,
+        dayInfo: { date: today.toISOString(), day_name: dayName },
+        attendance,
+    };
 }
 
-function TimetableView() {
+export default async function StudentDashboard() {
+    const { user } = await verifyServerAuth('student');
+    const data = await getStudentData(user.id);
+
     return (
-        <div className="space-y-4">
-            <div className="flex items-center justify-between">
-                <h2 className="text-sm font-medium text-neutral-500 uppercase tracking-wider">Weekly Schedule</h2>
-            </div>
-            <Card className="p-8 text-center">
-                <Calendar className="mx-auto mb-3 text-neutral-400" size={40} />
-                <p className="text-neutral-500 mb-4">View your complete weekly timetable</p>
-                <Link
-                    href="/student/timetable"
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-neutral-900 dark:bg-white text-white dark:text-black rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
-                >
-                    <Calendar size={16} />
-                    View Timetable
-                </Link>
-            </Card>
-        </div>
+        <StudentDashboardClient
+            timeline={data.timeline}
+            dayInfo={data.dayInfo}
+            attendance={data.attendance}
+        />
     );
-}
-
-function ProfileView() {
-    const [loading, setLoading] = useState(true);
-    const [data, setData] = useState<{
-        overall: { total_classes: number; attended: number; percentage: number };
-        subjects: Array<{
-            subject_id: string;
-            subject_code: string;
-            subject_name: string;
-            percentage: number;
-            total: number;
-            present: number;
-        }>;
-    } | null>(null);
-
-    useEffect(() => {
-        fetchAttendance();
-    }, []);
-
-    const fetchAttendance = async () => {
-        try {
-            const response = await fetch('/api/student/attendance');
-            if (response.ok) {
-                const result = await response.json();
-                setData(result);
-            }
-        } catch (error) {
-            console.error('Error fetching attendance:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const getStatusColor = (percentage: number) => {
-        if (percentage >= 85) return 'border-l-green-500';
-        if (percentage >= 75) return 'border-l-yellow-500';
-        return 'border-l-red-500';
-    };
-
-    const getStatusBadge = (percentage: number) => {
-        if (percentage >= 75) return { text: 'Compliant', class: 'bg-white/20 text-white hover:bg-white/30 dark:bg-black/10 dark:text-black dark:hover:bg-black/20' };
-        return { text: 'Defaulter', class: 'bg-red-500/20 text-red-100 hover:bg-red-500/30' };
-    };
-
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center py-20">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-neutral-900 dark:border-white"></div>
-            </div>
-        );
-    }
-
-    if (!data) {
-        return (
-            <div className="text-center py-20 text-neutral-400">
-                No attendance data found.
-            </div>
-        );
-    }
-
-    const badge = getStatusBadge(data.overall.percentage);
-
-    return (
-        <div className="space-y-6">
-            <Card className="p-6 bg-neutral-900 text-white dark:bg-white dark:text-black">
-                <div className="flex justify-between items-start">
-                    <div>
-                        <p className="text-sm opacity-80 mb-1">Overall Attendance</p>
-                        <h2 className="text-4xl font-bold">{data.overall.percentage}%</h2>
-                    </div>
-                    <Badge className={`${badge.class} border-none`}>
-                        {badge.text}
-                    </Badge>
-                </div>
-                <div className="mt-4 h-2 bg-white/20 dark:bg-black/10 rounded-full overflow-hidden">
-                    <div className="h-full bg-white dark:bg-black transition-all" style={{ width: `${data.overall.percentage}%` }} />
-                </div>
-                <p className="text-xs opacity-60 mt-2">
-                    {data.overall.attended} / {data.overall.total_classes} classes attended
-                </p>
-            </Card>
-
-            <div className="grid grid-cols-2 gap-3">
-                {data.subjects.map((subject) => (
-                    <Card key={subject.subject_id} className={`p-4 border-l-4 ${getStatusColor(subject.percentage)}`}>
-                        <p className="text-xs text-neutral-500 mb-1 truncate">{subject.subject_name}</p>
-                        <p className="text-xl font-bold">{subject.percentage}%</p>
-                        <p className="text-xs text-neutral-400">{subject.present}/{subject.total}</p>
-                    </Card>
-                ))}
-            </div>
-        </div>
-    )
 }
