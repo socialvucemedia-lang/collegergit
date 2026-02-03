@@ -58,14 +58,39 @@ export default function LoginPage() {
                 throw new Error('Authentication failed');
             }
 
-            // Get user profile via API (bypasses RLS) - single API call
-            const profileRes = await fetch('/api/auth/profile');
-            const profileData = await profileRes.json();
+            // Small delay to ensure session cookie is set
+            await new Promise(resolve => setTimeout(resolve, 100));
 
-            if (!profileRes.ok || !profileData.profile) {
+            // Get user profile via API (bypasses RLS) with retry mechanism
+            let profileData = null;
+            let lastError = null;
+            const MAX_RETRIES = 3;
+            const RETRY_DELAY = 200;
+
+            for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+                try {
+                    const profileRes = await fetch('/api/auth/profile');
+                    profileData = await profileRes.json();
+
+                    if (profileRes.ok && profileData.profile) {
+                        break; // Success
+                    }
+                    lastError = profileData.error || 'Profile fetch failed';
+                } catch (fetchError) {
+                    lastError = fetchError;
+                }
+
+                // Wait before retrying (except on last attempt)
+                if (attempt < MAX_RETRIES - 1) {
+                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+                }
+            }
+
+            if (!profileData?.profile) {
                 await signOut();
                 throw new Error(
-                    profileData.hint ||
+                    profileData?.hint ||
+                    lastError ||
                     'User profile not found. Please create a user profile in the database.'
                 );
             }

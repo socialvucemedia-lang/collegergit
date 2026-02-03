@@ -41,7 +41,17 @@ export default function TeacherDashboard() {
     const fetchData = async () => {
         try {
             setLoading(true);
+            // Use getUser() for fresh validation instead of potentially stale getSession()
+            const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+            if (authError || !user) {
+                console.error("Auth error in fetchData:", authError);
+                setLoading(false);
+                return;
+            }
+
             const { data: { session } } = await supabase.auth.getSession();
+
             const response = await fetch("/api/teacher/classes", {
                 headers: {
                     Authorization: `Bearer ${session?.access_token}`,
