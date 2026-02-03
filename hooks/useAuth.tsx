@@ -15,8 +15,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Timeout for loading state (10 seconds)
-const LOADING_TIMEOUT_MS = 10000;
+// Timeout for loading state (15 seconds - increased for cold starts)
+const LOADING_TIMEOUT_MS = 15000;
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<{
@@ -29,6 +29,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const initialized = useRef(false);
   const fetchingRef = useRef(false); // Prevent concurrent fetches
+  const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined); // Track timeout to clear it
 
   const refreshUser = useCallback(async () => {
     // Prevent concurrent profile fetches (race condition fix)
@@ -40,9 +41,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const currentUser = await getCurrentUser();
       setState({ user: currentUser, loading: false });
+
+      // Clear timeout since auth succeeded
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
     } catch (error) {
       console.error('Error refreshing user:', error);
       setState({ user: null, loading: false });
+
+      // Clear timeout on error too
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
     } finally {
       fetchingRef.current = false;
     }
@@ -60,17 +71,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-    let timeoutId: NodeJS.Timeout;
 
     const initAuth = async () => {
       if (initialized.current) return;
       initialized.current = true;
 
       // Set a timeout to prevent infinite loading state
-      timeoutId = setTimeout(() => {
-        if (mounted && state.loading) {
+      // Use ref so we can clear it from refreshUser
+      timeoutRef.current = setTimeout(() => {
+        if (mounted && fetchingRef.current) {
           console.warn('Auth loading timeout - resetting state');
           setState({ user: null, loading: false });
+          fetchingRef.current = false;
         }
       }, LOADING_TIMEOUT_MS);
 
@@ -96,7 +108,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       mounted = false;
-      clearTimeout(timeoutId);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
       subscription.unsubscribe();
     };
   }, [refreshUser]);
